@@ -117,15 +117,6 @@ OpenOcean: 3741.10 USDT
 ```
 
 ---
-
-## 🛣️ Roadmap
-
-* [x] Real-time 1inch and OpenOcean price comparison
-* [x] Arbitrage engine
-* [x] TWAP strategy executor
-* [ ] DCA strategy (coming soon)
-* [ ] Advanced risk management system
-
 ---
 
 
