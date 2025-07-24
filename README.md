@@ -1,10 +1,10 @@
-# ⚡ Quantlink AI Driven Tools
+# Quantlink AI Driven Tools
 
 **Quantlink AI Driven Tools** is a real-time DeFi analytics platform that detects arbitrage opportunities and executes TWAP (Time-Weighted Average Price) strategies across decentralized exchanges. It leverages live market data, price feeds, and custom execution logic to enable smarter crypto trading.
 
----
+## System Architecture
 
-## 🧠 System Architecture
+The platform follows a modular architecture with distinct layers for frontend presentation, backend processing, and external integrations:
 
 ```
 flowchart TD
@@ -21,9 +21,9 @@ flowchart TD
     F -->|TWAP Results| A
 ```
 
----
+## Project Structure
 
-## 📁 Project Structure
+The codebase is organized into clear separation between frontend and backend components:
 
 ```
 Quantlink_AI_Driven_Tools/
@@ -44,35 +44,39 @@ Quantlink_AI_Driven_Tools/
 │   │   └── App.tsx           # Main app entry
 │   └── vite.config.ts        # Vite configuration
 ├── .env.example              # Sample environment variables
-└── README.md                 # You're here!
+└── README.md                 # Project documentation
 ```
 
----
+## Core Features
 
-## 🔧 Features
+**Arbitrage Detection** - The system continuously monitors price differences between multiple **DEX aggregators** using both **1inch** and **OpenOcean** price feeds to identify profitable arbitrage opportunities.
 
-* ✅ **Arbitrage Detection** using 1inch and OpenOcean price feeds
-* ⏱️ **TWAP Execution** with interval-based trade slicing
-* 📊 **Live Token Analytics** including price, liquidity, and volume
-* 🔄 **DEX Routing Logic** based on slippage and profitability
-* 🌐 **Modern Web UI** powered by Vite and React
+**TWAP Execution** - Implements sophisticated **Time-Weighted Average Price** strategies with interval-based trade slicing to minimize market impact and optimize execution prices.
 
----
+**Live Token Analytics** - Provides comprehensive market data including real-time price feeds, liquidity depth analysis, and trading volume metrics across supported tokens.
 
-## 🚀 Installation
+**DEX Routing Logic** - Employs intelligent routing algorithms that consider slippage tolerance, gas costs, and profitability metrics to determine optimal execution paths.
 
-### Backend (Python)
+**Modern Web Interface** - Features a responsive user interface built with **Vite** and **React** for real-time monitoring and strategy management.
+
+## Installation Guide
+
+### Backend Setup (Python)
+
+Navigate to the backend directory and set up the Python environment:
 
 ```bash
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # Fill in your API keys
+cp .env.example .env   # Configure your API credentials
 uvicorn main:app --reload
 ```
 
-### Frontend (React)
+### Frontend Setup (React)
+
+Initialize the frontend development environment:
 
 ```bash
 cd frontend
@@ -80,23 +84,18 @@ npm install
 npm run dev
 ```
 
-Open the app in your browser at:
-👉 [http://localhost:5173](http://localhost:5173)
+Access the application interface at: **http://localhost:5173**
 
----
+## Usage Instructions
 
-## 🧪 Usage
+1. Initialize the backend server using `uvicorn main:app --reload` command
+2. Launch the frontend development server with `npm run dev`
+3. Navigate to the application URL at `http://localhost:5173`
+4. Monitor arbitrage opportunities and review TWAP execution results through the dashboard interface
 
-1. Start the backend with `uvicorn main:app --reload`
-2. Start the frontend with `npm run dev`
-3. Navigate to `http://localhost:5173`
-4. View arbitrage opportunities and TWAP execution results in real-time
+## Environment Configuration
 
----
-
-## 🌍 Environment Variables
-
-`.env` file (for backend):
+Create a `.env` file in the backend directory with the following configuration parameters:
 
 ```env
 ONEINCH_API_KEY=your_1inch_api_key
@@ -105,18 +104,18 @@ DEXTOOLS_API_KEY=your_dextools_api_key
 COINGECKO_URL=https://api.coingecko.com
 ```
 
----
+## Sample Output
 
-## 📸 Sample Output
+The system provides detailed execution logs and opportunity analysis:
 
 ```
-🔍 Comparing prices for 1 ETH → USDT:
+Comparing prices for 1 ETH → USDT:
 1inch: 3743.25 USDT
 OpenOcean: 3741.10 USDT
-✅ Arbitrage Opportunity: Buy from OpenOcean, Sell on 1inch
+Arbitrage Opportunity Detected: Buy from OpenOcean, Sell on 1inch
+Potential Profit: 2.15 USDT (0.057% spread)
 ```
 
----
----
+## Technical Implementation
 
-
+The platform utilizes **Python FastAPI** for backend processing, implementing asynchronous request handling for optimal performance. The **React frontend** communicates through RESTful APIs, providing real-time updates via WebSocket connections when available. Market data aggregation occurs through multiple **price feed providers** to ensure accuracy and redundancy in arbitrage detection algorithms.
