@@ -9,7 +9,11 @@ from fastapi import APIRouter
 import math
 from typing import Any
 from app.aggregator.price_feed import calculate_slippage
-
+from app.aggregator.price_feed import fetch_gas_costs
+from app.ai.arbitrage_detector import detect_arbitrage
+from app.config.tokens import TOKENS
+from app.aggregator.price_feed import fetch_token_data_extended, fetch_gas_costs
+from app.routing.dex_clients.coingecko import get_usd_per_qlk
 
 logging.basicConfig(
     level=logging.INFO,
@@ -511,56 +515,6 @@ SYMBOL_TO_ID = {
     "ocean":   "ocean-protocol",
 }
 
-def fetch_token_data(symbol: str) -> Any:
-    token = TOKENS.get(symbol)
-    if not token:
-        print(f"[ERROR] Symbol not found in TOKENS: {symbol}")
-        return None
-
-    address = token["address"]
-    chain = token["chain"]
-    
-    try:
-        url = f"https://api.dexscreener.com/latest/dex/pairs/{chain}/{address}"
-        print(f"🔍 Fetching {symbol} from {url}...")
-        resp = requests.get(url, timeout=5)
-        resp.raise_for_status()
-        data = resp.json()
-
-        pair = data.get("pairs")
-        if not pair or not isinstance(pair, list):
-            print(f"[WARN] No pairs found for {symbol} from {url}")
-            return None
-
-        results = []
-        for p in pair:
-            price = float(p.get("priceUsd", 0))
-            liquidity = float(p.get("liquidity", {}).get("usd", 0))
-            volume = float(p.get("volume", {}).get("h24", 0))
-            dex_name = p.get("dexId", "unknown")
-
-            if price == 0:
-                continue 
-
-            results.append({
-                "symbol": symbol,
-                "price": price,
-                "liquidity": liquidity,
-                "volume": volume,
-                "dex": dex_name,
-                "chain": chain,
-            })
-
-        if not results:
-            print(f"[WARN] No valid results for {symbol}")
-            return None
-
-        return results
-
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch token data for {symbol}: {e}")
-        return None
-
 def calculate_slippage(trade_size_usd: float, liquidity_usd: float) -> float:
     if liquidity_usd <= 0:
         return 100.0  
@@ -663,34 +617,27 @@ def fetch_price_from_openocean(from_symbol: str,
 
         out_raw = Decimal(data["data"]["outAmount"])
 
-        # Debug: API response'unu logla
         print(f"[DEBUG] OpenOcean raw response for {from_symbol}→{to_symbol}: outAmount={out_raw}")
 
-        # OpenOcean API'si outAmount'u token'ın native decimals'ında döndürür
         out_decimals = dst["decimals"]
 
-        # OpenOcean API'si outAmount'u token'ın native decimals'ında döndürür
         normalized = out_raw / Decimal(10 ** out_decimals)
 
-        # Eğer reference price varsa (1inch fiyatı), ona göre doğru normalizasyon yap
         if reference_price is not None:
             reference_price = Decimal(str(reference_price))
             print(f"[DEBUG] Reference price: {reference_price}, Initial normalized: {normalized}")
 
-            # Reference price ile %5 tolerans içinde olmalı (çok dar tolerans)
-            min_expected = reference_price * Decimal("0.95")   # %5 düşük
-            max_expected = reference_price * Decimal("1.05")   # %5 yüksek
+            min_expected = reference_price * Decimal("0.95")
+            max_expected = reference_price * Decimal("1.05")
 
-            # Eğer değer çok farklıysa, reference price'a yakın bir değer üret
             if normalized < min_expected or normalized > max_expected:
                 print(f"[DEBUG] Value out of expected range, using reference-based calculation")
 
-                # BTC ve ETH için çok daha küçük varyasyon (çok yüksek fiyatlı tokenlar)
                 if from_symbol.lower() in ['btc', 'eth']:
-                    variation_pct = random.uniform(0.00001, 0.0005)  # %0.001 - %0.05 (çok küçük)
+                    variation_pct = random.uniform(0.00001, 0.0005)
                     print(f"[DEBUG] Using small variation for high-value token {from_symbol}: {variation_pct}")
                 else:
-                    variation_pct = random.uniform(0.0001, 0.005)  # %0.01 - %0.5
+                    variation_pct = random.uniform(0.0001, 0.005)
 
                 if random.choice([True, False]):
                     normalized = reference_price * (Decimal("1") + Decimal(str(variation_pct)))
@@ -700,7 +647,6 @@ def fetch_price_from_openocean(from_symbol: str,
                 print(f"[DEBUG] Adjusted to reference-based value: {normalized}")
 
         else:
-            # Reference price yoksa, USD fiyatlarından tahmin et
             usd_price_from = usd_prices.get(from_symbol.lower())
             usd_price_to = usd_prices.get(to_symbol.lower())
 
@@ -708,14 +654,12 @@ def fetch_price_from_openocean(from_symbol: str,
                 expected_rate = usd_price_from / usd_price_to
                 print(f"[DEBUG] Expected rate from USD prices: {expected_rate}")
 
-                # Eğer normalized değer beklenen değerden çok farklıysa düzelt
-                if abs(normalized - expected_rate) > expected_rate * Decimal("0.1"):  # %10'dan fazla fark
-                    # BTC ve ETH için çok daha küçük varyasyon
+                if abs(normalized - expected_rate) > expected_rate * Decimal("0.1"):
                     if from_symbol.lower() in ['btc', 'eth']:
-                        variation_pct = random.uniform(0.00001, 0.0005)  # %0.001 - %0.05 (çok küçük)
+                        variation_pct = random.uniform(0.00001, 0.0005)
                         print(f"[DEBUG] Using small USD-based variation for {from_symbol}: {variation_pct}")
                     else:
-                        variation_pct = random.uniform(0.0001, 0.005)  # %0.01 - %0.5
+                        variation_pct = random.uniform(0.0001, 0.005)
 
                     if random.choice([True, False]):
                         normalized = expected_rate * (Decimal("1") + Decimal(str(variation_pct)))
@@ -723,12 +667,11 @@ def fetch_price_from_openocean(from_symbol: str,
                         normalized = expected_rate * (Decimal("1") - Decimal(str(variation_pct)))
                     print(f"[DEBUG] Adjusted to USD-based value: {normalized}")
             else:
-                # Son çare: çok büyük değerleri agresif şekilde düzelt
-                if normalized > Decimal("100000"):  # 100K'dan büyükse
-                    normalized = normalized / Decimal("1000000")  # 1M'e böl
+                if normalized > Decimal("100000"):
+                    normalized = normalized / Decimal("1000000")
                     print(f"[DEBUG] Large value aggressively normalized to: {normalized}")
-                elif normalized < Decimal("0.00001"):  # çok küçükse
-                    normalized = normalized * Decimal("1000000")  # 1M ile çarp
+                elif normalized < Decimal("0.00001"): 
+                    normalized = normalized * Decimal("1000000")
                     print(f"[DEBUG] Small value aggressively normalized to: {normalized}")
 
         print(f"[OpenOcean] {from_symbol} → {to_symbol}: amount={amount} = {normalized}")
@@ -765,14 +708,13 @@ def check_arbitrage_opportunity(from_symbol: str,
     price_1inch = fetch_price_from_1inch(from_symbol, to_symbol, amount)
     print(f"[DEBUG] 1inch price for {from_symbol}→{to_symbol}: {price_1inch}")
 
-    # 1inch fiyatını reference olarak OpenOcean'a geç
     price_openocean = fetch_price_from_openocean(from_symbol, to_symbol, amount, usd_prices, reference_price=price_1inch)
     print(f"[DEBUG] OpenOcean price for {from_symbol}→{to_symbol}: {price_openocean}")
 
     if price_1inch is None or price_openocean is None:
         return None, None, None, None
 
-    estimated_gas_usd = Decimal("15.0")  # Daha gerçekçi gas maliyeti
+    estimated_gas_usd = Decimal("15.0")
 
     if price_1inch < price_openocean:
         buy_from = "1inch"
@@ -801,155 +743,20 @@ def check_arbitrage_opportunity(from_symbol: str,
 router = APIRouter()
 @router.get("/api/arbitrage")
 def get_arbitrage_opportunities_api():
-    """
-    Arbitrage fırsatlarını döndürür - Dashboard'daki Recent Arbitrage Opportunities tablosu için
-    """
-    try:
-        usd_prices = fetch_all_usd_prices()
-    except Exception as e:
-        print(f"[ERROR] CoinGecko fetch failed, using fallback prices: {e}")
-        # CoinGecko rate limit durumunda fallback fiyatlar kullan
-        usd_prices = {
-            "bitcoin": 118000.0,
-            "ethereum": 3650.0,
-            "tether": 1.0,
-            "usd-coin": 1.0,
-            "binancecoin": 720.0,
-            "solana": 240.0,
-            "ripple": 2.8,
-            "dogecoin": 0.38,
-            "cardano": 1.05,
-            "chainlink": 19.0,
-            "uniswap": 10.5,
-            "aave": 301.0,
-            "curve-dao-token": 0.94,
-            "dai": 1.0,
-            "near": 2.93
-        }
+    token_data = {}
+    gas_costs = fetch_gas_costs()
 
-    opportunities = []
+    for symbol in TOKENS.keys():
+        data = fetch_token_data_extended(symbol) 
+        if data and len(data) >= 2:
+            token_data[symbol] = data
+    print(f"🔎 DEBUG token_data keys: {list(token_data.keys())}")
+    for sym, entries in token_data.items():
+        print(f"   {sym}: {len(entries)} entries")
 
-    # Popüler tokenlar için arbitrage fırsatları oluştur
-    popular_tokens = ["BTC", "ETH", "USDT", "USDC", "BNB", "SOL", "XRP", "DOGE", "ADA", "LINK", "UNI", "AAVE", "CRV", "DAI", "NEAR"]
+    results = detect_arbitrage(token_data, gas_costs)
+    return results
 
-    for token in popular_tokens:
-        if token.lower() == "usdt":
-            continue
-
-        try:
-            # 1inch ve OpenOcean fiyatlarını al
-            price_1inch = fetch_price_from_1inch(token, "usdt", Decimal("1"))
-            price_openocean = fetch_price_from_openocean(token, "usdt", Decimal("1"), usd_prices)
-
-            if price_1inch and price_openocean and price_1inch > 0 and price_openocean > 0:
-                # Arbitrage hesaplama
-                if price_1inch > price_openocean:
-                    buy_exchange = "OpenOcean"
-                    sell_exchange = "1inch"
-                    buy_price = float(price_openocean)
-                    sell_price = float(price_1inch)
-                else:
-                    buy_exchange = "1inch"
-                    sell_exchange = "OpenOcean"
-                    buy_price = float(price_1inch)
-                    sell_price = float(price_openocean)
-
-                profit_usd = sell_price - buy_price
-                profit_percentage = (profit_usd / buy_price) * 100
-
-                # Sadece karlı fırsatları ekle (%0.01'den fazla kar - daha gerçekçi)
-                if profit_percentage > 0.01:
-                    opportunities.append({
-                        "token": token.upper(),
-                        "buy_exchange": buy_exchange,
-                        "sell_exchange": sell_exchange,
-                        "buy_price": round(buy_price, 6),
-                        "sell_price": round(sell_price, 6),
-                        "profit_usd": round(profit_usd, 6),
-                        "profit_percentage": round(profit_percentage, 2),
-                        "volume_24h": random.uniform(10000, 1000000),
-                        "liquidity": random.uniform(50000, 5000000),
-                        "timestamp": datetime.now().isoformat()
-                    })
-            else:
-                # Eğer gerçek fiyat alınamazsa fallback fırsat oluştur
-                coingecko_id = token.lower()
-                if token == "BTC":
-                    coingecko_id = "bitcoin"
-                elif token == "ETH":
-                    coingecko_id = "ethereum"
-                elif token == "USDT":
-                    coingecko_id = "tether"
-                elif token == "USDC":
-                    coingecko_id = "usd-coin"
-                elif token == "BNB":
-                    coingecko_id = "binancecoin"
-                elif token == "SOL":
-                    coingecko_id = "solana"
-                elif token == "XRP":
-                    coingecko_id = "ripple"
-                elif token == "DOGE":
-                    coingecko_id = "dogecoin"
-                elif token == "ADA":
-                    coingecko_id = "cardano"
-                elif token == "LINK":
-                    coingecko_id = "chainlink"
-                elif token == "UNI":
-                    coingecko_id = "uniswap"
-                elif token == "AAVE":
-                    coingecko_id = "aave"
-                elif token == "CRV":
-                    coingecko_id = "curve-dao-token"
-                elif token == "DAI":
-                    coingecko_id = "dai"
-                elif token == "NEAR":
-                    coingecko_id = "near"
-
-                base_price = usd_prices.get(coingecko_id, 100.0)
-                if isinstance(base_price, str):
-                    base_price = float(base_price)
-
-                # BTC ve ETH için çok daha küçük fark (yüksek fiyatlı tokenlar)
-                if token.upper() in ['BTC', 'ETH']:
-                    price_diff = base_price * random.uniform(0.00001, 0.0005)  # %0.001-0.05 fark (çok küçük)
-                else:
-                    price_diff = base_price * random.uniform(0.0001, 0.005)  # %0.01-0.5 fark
-
-                if random.choice([True, False]):
-                    buy_exchange = "1inch"
-                    sell_exchange = "OpenOcean"
-                    buy_price = base_price
-                    sell_price = base_price + price_diff
-                else:
-                    buy_exchange = "OpenOcean"
-                    sell_exchange = "1inch"
-                    buy_price = base_price
-                    sell_price = base_price + price_diff
-
-                profit_usd = sell_price - buy_price
-                profit_percentage = (profit_usd / buy_price) * 100
-
-                opportunities.append({
-                    "token": token.upper(),
-                    "buy_exchange": buy_exchange,
-                    "sell_exchange": sell_exchange,
-                    "buy_price": round(buy_price, 6),
-                    "sell_price": round(sell_price, 6),
-                    "profit_usd": round(profit_usd, 6),
-                    "profit_percentage": round(profit_percentage, 2),
-                    "volume_24h": random.uniform(10000, 1000000),
-                    "liquidity": random.uniform(50000, 5000000),
-                    "timestamp": datetime.now().isoformat()
-                })
-
-        except Exception as e:
-            print(f"[ERROR] Failed arbitrage check for {token}: {e}")
-            continue
-
-    # Kar yüzdesine göre sırala
-    opportunities.sort(key=lambda x: x["profit_percentage"], reverse=True)
-
-    return {"opportunities": opportunities[:10]}  # En iyi 10 fırsat
 
 def execute_twap(from_symbol: str,
                  to_symbol: str,
