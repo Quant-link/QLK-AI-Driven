@@ -5,11 +5,10 @@ from app.routing.dex_clients.dexscreener import get_token_info
 
 TOKENS_PATH = os.path.join(os.path.dirname(__file__), "tokens.json")
 
-# 🧱 Default fallback tokens (hardcoded)
 TOKENS = {
     "ETH": {
         "chain": "ethereum",
-        "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
     },
     "USDC": {
         "chain": "ethereum",
@@ -17,7 +16,7 @@ TOKENS = {
     },
     "DAI": {
         "chain": "ethereum",
-        "address": "0x6b175474e89094c44da98b954eedeac495271d0f"
+        "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F"
     },
     "WBTC": {
         "chain": "ethereum",
@@ -26,10 +25,10 @@ TOKENS = {
     "UNI": {
         "chain": "ethereum",
         "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984"
-    },
+    }
 }
 
-# 📥 Enrich token list with Coingecko + Dexscreener
+
 def enrich_tokens_with_coingecko():
     top_tokens = fetch_top_100_tokens()
     enriched = []
@@ -42,12 +41,15 @@ def enrich_tokens_with_coingecko():
             token_info = get_token_info(token_id) or get_token_info(symbol)
 
             if token_info:
-                enriched.append({
-                    "symbol": symbol,
-                    "chain": token_info["chain"],
-                    "address": token_info["address"]
-                })
-                print(f"✅ Added {symbol}: chain={token_info['chain']}, address={token_info['address']}")
+                if token_info["chain"].lower() == "ethereum":
+                    enriched.append({
+                        "symbol": symbol,
+                        "chain": token_info["chain"],
+                        "address": token_info["address"]
+                    })
+                    print(f"✅ Added {symbol}: chain={token_info['chain']}, address={token_info['address']}")
+                else:
+                    print(f"⏭️ Skipped {symbol}: chain={token_info['chain']}")
             else:
                 print(f"❌ No data for {symbol}")
         except Exception as e:
@@ -56,14 +58,14 @@ def enrich_tokens_with_coingecko():
 
     return enriched
 
-# 🔄 JSON dosyasından yükleme (dict formatında)
 try:
     with open(TOKENS_PATH) as f:
         tokens_list = json.load(f)
         TOKENS = {
             token["symbol"]: {
                 "chain": token["chain"],
-                "address": token["address"]
+                "addresses": token.get("addresses", []),
+                "address": token.get("address")
             }
             for token in tokens_list
         }
@@ -71,9 +73,14 @@ except FileNotFoundError:
     TOKENS = {}
     print("⚠️ tokens.json not found, TOKENS dict is empty.")
 
-# 🧪 CLI çalıştırıldığında yeni token listesi kaydet
 if __name__ == "__main__":
     all_tokens = enrich_tokens_with_coingecko()
     with open(TOKENS_PATH, "w") as f:
         json.dump(all_tokens, f, indent=2)
-    print(f"\n✅ Saved {len(all_tokens)} tokens to {TOKENS_PATH}")
+    print(f"\n✅ Saved {len(all_tokens)} Ethereum tokens to {TOKENS_PATH}")
+
+def refresh_tokens():
+    all_tokens = enrich_tokens_with_coingecko()
+    with open(TOKENS_PATH, "w") as f:
+        json.dump(all_tokens, f, indent=2)
+    print(f"✅ Saved {len(all_tokens)} Ethereum tokens to {TOKENS_PATH}")
