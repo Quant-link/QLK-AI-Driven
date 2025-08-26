@@ -98,10 +98,12 @@ Access the application interface at: **http://localhost:5173**
 Create a `.env` file in the backend directory with the following configuration parameters:
 
 ```env
-ONEINCH_API_KEY=your_1inch_api_key
-OPENOCEAN_API_KEY=your_openocean_api_key
-DEXTOOLS_API_KEY=your_dextools_api_key
-COINGECKO_URL=https://api.coingecko.com
+COINGECKO_API_KEY=your_coingecko_api_key
+COINGECKO_BASE_URL=required_URL
+QLK_CG_ID=quantlink
+ETHEREUM_API_KEY=your_ethereum_api_key
+ALCHEMY_API_KEY=your_alchemy_api_key
+QLK_ADDRESS_ETHEREUM=0xe226B7Ae83a44Bb98F67BEA28C4ad73B0925C49E
 ```
 
 ## Sample Output
