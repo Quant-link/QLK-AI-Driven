@@ -1,24 +1,12 @@
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
-import {
-  TrendingUp,
-  Clock,
-  Zap,
-  CheckCircle,
-  XCircle,
-  Timer,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+import { TrendingUp, Clock, Zap, CheckCircle, XCircle, Timer } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 function getStatusConfig(status: string) {
   switch (status) {
@@ -47,21 +35,40 @@ function getStatusConfig(status: string) {
         icon: Timer,
       };
     default:
-      return {
-        color: "bg-gray-100 text-gray-800 border-gray-200",
-        icon: Clock,
-      };
+      return { color: "bg-gray-100 text-gray-800 border-gray-200", icon: Clock };
   }
 }
+
+function formatQLK(qlk: number, usd?: number) {
+  const qlkStr = `${qlk.toLocaleString("en-US", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6,
+  })} QLK`;
+  return usd !== undefined ? `${qlkStr} (~$${usd.toFixed(2)})` : qlkStr;
+}
+
+const DEX_LABEL: Record<string, string> = {
+  uniswap_v2: "Uniswap V2",
+  uniswap_v3: "Uniswap V3",
+  sushiswap: "SushiSwap",
+  curve: "Curve",
+  balancer: "Balancer",
+  swappi: "Swappi",
+  pumpswap: "PumpSwap",
+  raydium: "Raydium",
+  pancakeswap: "PancakeSwap",
+  osmosis: "Osmosis",
+};
 
 export function RecentOpportunitiesTable() {
   interface Opportunity {
     id: number;
     tokenA: string;
     tokenB: string;
-    dexA: string;
-    dexB: string;
-    profit: number;
+    dexA: string; // lowercase id
+    dexB: string; // lowercase id
+    profitQLK: number;
+    profitUSD: number;
     profitPercentage: number;
     volume: number;
     gasUsed?: number;
@@ -76,47 +83,41 @@ export function RecentOpportunitiesTable() {
     fetch("http://localhost:8000/api/arbitrage")
       .then((res) => res.json())
       .then((data) => {
-        console.log("Arbitrage API response:", data); // Debug log
-        if (data.opportunities && Array.isArray(data.opportunities)) {
-          const formatted = data.opportunities.map(
-            (item: any, idx: number) => ({
-              id: idx + 1,
-              tokenA: item.token,
-              tokenB: "USDT",
-              dexA: item.buy_exchange,
-              dexB: item.sell_exchange,
-              profit: item.profit_usd,
-              profitPercentage: item.profit_percentage,
-              volume: item.volume_24h || Math.random() * 10000 + 1000,
-              gasUsed: Math.floor(Math.random() * 50000),
-              timestamp: new Date(item.timestamp || Date.now()),
-              executionTime: Math.floor(Math.random() * 5),
-              status: "detected",
-            })
-          );
-          setOpportunities(formatted);
-          console.log("Formatted opportunities:", formatted); // Debug log
-        } else {
-          console.error("No opportunities found in response:", data);
+        if (!data || !Array.isArray(data.opportunities)) {
+          console.error("Invalid arbitrage payload", data);
+          return;
         }
+
+        const formatted = data.opportunities
+        .map((item: any, idx: number) => {
+          return {
+            id: idx + 1,
+            tokenA: item.symbol || "UNKNOWN",
+            tokenB: "QLK",
+            dexA: (item.buy_from || "").toLowerCase(),
+            dexB: (item.sell_to || "").toLowerCase(),
+            profitQLK: Number(item.net_profit_qlk ?? 0),
+            profitUSD: Number(item.net_profit_usd ?? 0),
+            profitPercentage: Number(item.spread_pct ?? 0), 
+            volume: Number(item.volume ?? 0), 
+            gasUsed: Number(item.gas_cost_usd ?? 0),
+            timestamp: item.timestamp ? new Date(item.timestamp * 1000) : new Date(),
+            executionTime: item.execution_time_sec ?? null,
+            status: "detected", 
+          } as Opportunity;
+        })
+        setOpportunities(formatted);
       })
-      .catch((err) => console.error("API fetch failed", err));
+      .catch((err) => console.error("Arbitrage API error", err));
   }, []);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  };
-
   const formatVolume = (volume: number) => {
-    if (volume >= 1000000) return `$${(volume / 1000000).toFixed(1)}M`;
-    if (volume >= 1000) return `$${(volume / 1000).toFixed(1)}K`;
+    if (volume >= 1_000_000) return `$${(volume / 1_000_000).toFixed(1)}M`;
+    if (volume >= 1_000) return `$${(volume / 1_000).toFixed(1)}K`;
     return `$${volume.toFixed(0)}`;
   };
+
+  const rows = useMemo(() => opportunities, [opportunities]);
 
   return (
     <Card>
@@ -127,7 +128,7 @@ export function RecentOpportunitiesTable() {
             <span>Recent Arbitrage Opportunities</span>
           </CardTitle>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Latest detected and executed arbitrage trades
+            Latest detected and executed arbitrage trades (in QLK)
           </p>
         </div>
         <Button variant="outline" size="sm" className="hidden sm:flex">
@@ -136,7 +137,7 @@ export function RecentOpportunitiesTable() {
         </Button>
       </CardHeader>
       <CardContent>
-        {/* Desktop Table */}
+        {/* Desktop */}
         <div className="hidden lg:block">
           <Table>
             <TableHeader>
@@ -151,76 +152,62 @@ export function RecentOpportunitiesTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {opportunities.map((opportunity) => {
-                const statusConfig = getStatusConfig(opportunity.status);
-                const StatusIcon = statusConfig.icon;
-
+              {rows.map((o) => {
+                const s = getStatusConfig(o.status);
+                const Icon = s.icon as any;
                 return (
-                  <TableRow key={opportunity.id} className="hover:bg-muted/50">
+                  <TableRow key={o.id} className="hover:bg-muted/50">
                     <TableCell>
                       <div className="font-medium">
-                        {opportunity.tokenA}/{opportunity.tokenB}
+                        {o.tokenA}/{o.tokenB}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        {opportunity.profitPercentage.toFixed(2)}% spread
+                        {o.profitPercentage.toFixed(2)}% spread
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                        <div className="text-sm font-medium">
-                          {opportunity.dexA}
-                        </div>
+                        <div className="text-sm font-medium">{DEX_LABEL[o.dexA] ?? o.dexA}</div>
                         <div className="text-xs text-muted-foreground flex items-center">
                           <span>→</span>
-                          <span className="ml-1">{opportunity.dexB}</span>
+                          <span className="ml-1">{DEX_LABEL[o.dexB] ?? o.dexB}</span>
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="font-medium text-green-600">
-                        {formatCurrency(opportunity.profit)}
+                        {formatQLK(o.profitQLK, o.profitUSD)}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {opportunity.profitPercentage.toFixed(2)}%
+                        {o.profitPercentage.toFixed(2)}%
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="font-medium">
-                        {formatVolume(opportunity.volume)}
-                      </div>
-                      {opportunity.gasUsed && (
+                      <div className="font-medium">{formatVolume(o.volume)}</div>
+                      {o.gasUsed && (
                         <div className="text-xs text-muted-foreground">
-                          Gas: {opportunity.gasUsed.toLocaleString()}
+                          Gas: {o.gasUsed.toLocaleString()}
                         </div>
                       )}
                     </TableCell>
                     <TableCell>
                       <div className="text-sm">
-                        {formatDistanceToNow(opportunity.timestamp, {
-                          addSuffix: true,
-                        })}
+                        {formatDistanceToNow(o.timestamp, { addSuffix: true })}
                       </div>
-                      {opportunity.executionTime && (
+                      {o.executionTime && (
                         <div className="text-xs text-muted-foreground">
-                          Exec: {opportunity.executionTime}s
+                          Exec: {o.executionTime}s
                         </div>
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge className={statusConfig.color}>
-                        <StatusIcon className="h-3 w-3 mr-1" />
-                        {opportunity.status}
+                      <Badge className={s.color}>
+                        <Icon className="h-3 w-3 mr-1" />
+                        {o.status}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          console.log("View details for:", opportunity.id);
-                        }}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => console.log("Details", o)}>
                         Details
                       </Button>
                     </TableCell>
@@ -231,28 +218,25 @@ export function RecentOpportunitiesTable() {
           </Table>
         </div>
 
-        {/* Mobile Cards */}
+        {/* Mobile */}
         <div className="lg:hidden space-y-4">
-          {opportunities.map((opportunity) => {
-            const statusConfig = getStatusConfig(opportunity.status);
-            const StatusIcon = statusConfig.icon;
-
+          {rows.map((o) => {
+            const s = getStatusConfig(o.status);
+            const Icon = s.icon as any;
             return (
-              <Card key={opportunity.id} className="p-4">
+              <Card key={o.id} className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <div className="font-medium text-base">
-                      {opportunity.tokenA}/{opportunity.tokenB}
+                      {o.tokenA}/{o.tokenB}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {opportunity.dexA} → {opportunity.dexB}
+                      {DEX_LABEL[o.dexA] ?? o.dexA} → {DEX_LABEL[o.dexB] ?? o.dexB}
                     </div>
                   </div>
-                  <Badge className={statusConfig.color}>
-                    <StatusIcon className="h-3 w-3 mr-1" />
-                    <span className="hidden sm:inline">
-                      {opportunity.status}
-                    </span>
+                  <Badge className={s.color}>
+                    <Icon className="h-3 w-3 mr-1" />
+                    <span className="hidden sm:inline">{o.status}</span>
                   </Badge>
                 </div>
 
@@ -260,20 +244,18 @@ export function RecentOpportunitiesTable() {
                   <div>
                     <div className="text-muted-foreground">Profit</div>
                     <div className="font-medium text-green-600">
-                      {formatCurrency(opportunity.profit)}
+                      {formatQLK(o.profitQLK, o.profitUSD)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {opportunity.profitPercentage.toFixed(2)}%
+                      {o.profitPercentage.toFixed(2)}%
                     </div>
                   </div>
                   <div>
                     <div className="text-muted-foreground">Volume</div>
-                    <div className="font-medium">
-                      {formatVolume(opportunity.volume)}
-                    </div>
-                    {opportunity.gasUsed && (
+                    <div className="font-medium">{formatVolume(o.volume)}</div>
+                    {o.gasUsed && (
                       <div className="text-xs text-muted-foreground">
-                        Gas: {opportunity.gasUsed.toLocaleString()}
+                        Gas: {o.gasUsed.toLocaleString()}
                       </div>
                     )}
                   </div>
@@ -281,23 +263,14 @@ export function RecentOpportunitiesTable() {
 
                 <div className="flex items-center justify-between mt-3 pt-3 border-t">
                   <div className="text-xs text-muted-foreground">
-                    {formatDistanceToNow(opportunity.timestamp, {
-                      addSuffix: true,
-                    })}
-                    {opportunity.executionTime && (
-                      <span className="ml-2">
-                        • Exec: {opportunity.executionTime}s
-                      </span>
-                    )}
+                    {formatDistanceToNow(o.timestamp, { addSuffix: true })}
+                    {o.executionTime && <span className="ml-2">• Exec: {o.executionTime}s</span>}
                   </div>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="h-8 px-3"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      console.log("View details for:", opportunity.id);
-                    }}
+                    onClick={() => console.log("Details", o)}
                   >
                     Details
                   </Button>
@@ -307,7 +280,7 @@ export function RecentOpportunitiesTable() {
           })}
         </div>
 
-        {/* Tablet Table */}
+        {/* Tablet */}
         <div className="hidden md:block lg:hidden">
           <Table>
             <TableHeader>
@@ -320,49 +293,37 @@ export function RecentOpportunitiesTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {opportunities.map((opportunity) => {
-                const statusConfig = getStatusConfig(opportunity.status);
-                const StatusIcon = statusConfig.icon;
-
+              {rows.map((o) => {
+                const s = getStatusConfig(o.status);
+                const Icon = s.icon as any;
                 return (
-                  <TableRow key={opportunity.id} className="hover:bg-muted/50">
+                  <TableRow key={o.id} className="hover:bg-muted/50">
                     <TableCell>
                       <div className="font-medium">
-                        {opportunity.tokenA}/{opportunity.tokenB}
+                        {o.tokenA}/{o.tokenB}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {opportunity.profitPercentage.toFixed(2)}%
+                        {o.profitPercentage.toFixed(2)}%
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="text-sm">{opportunity.dexA}</div>
-                      <div className="text-xs text-muted-foreground">
-                        → {opportunity.dexB}
-                      </div>
+                      <div className="text-sm">{DEX_LABEL[o.dexA] ?? o.dexA}</div>
+                      <div className="text-xs text-muted-foreground">→ {DEX_LABEL[o.dexB] ?? o.dexB}</div>
                     </TableCell>
                     <TableCell>
                       <div className="font-medium text-green-600">
-                        {formatCurrency(opportunity.profit)}
+                        {formatQLK(o.profitQLK, o.profitUSD)}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatVolume(opportunity.volume)}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{formatVolume(o.volume)}</div>
                     </TableCell>
                     <TableCell>
-                      <Badge className={statusConfig.color}>
-                        <StatusIcon className="h-3 w-3 mr-1" />
-                        {opportunity.status}
+                      <Badge className={s.color}>
+                        <Icon className="h-3 w-3 mr-1" />
+                        {o.status}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          console.log("View details for:", opportunity.id);
-                        }}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => console.log("Details", o)}>
                         Details
                       </Button>
                     </TableCell>
