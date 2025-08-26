@@ -1,25 +1,48 @@
-import requests
+import os, time, requests
 from decimal import Decimal
 from typing import Tuple, Dict
 
 from app.routing.dex_clients.base import DexClient
 
+_CG_HEADERS = {"accept": "application/json"}
+_api_key = os.getenv("COINGECKO_API_KEY")
+if _api_key:
+    _CG_HEADERS["x-cg-pro-api-key"] = _api_key
+
+_CG_CACHE = {"ts": 0.0, "data": None}
+_CG_TTL = 300 
+
 def fetch_top_100_tokens() -> list:
-    url = "https://api.coingecko.com/api/v3/coins/markets"
+    now = time.time()
+    if _CG_CACHE["data"] and now - _CG_CACHE["ts"] < _CG_TTL:
+        return _CG_CACHE["data"]
+
+    base_url = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
+    url = f"{base_url}/coins/markets"
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
         "per_page": 100,
         "page": 1,
-        "sparkline": False
+        "sparkline": False,
     }
-    response = requests.get(url, params=params, timeout=10)
-    response.raise_for_status()
-    return response.json()
+
+    for i in range(3):
+        r = requests.get(url, params=params, headers=_CG_HEADERS, timeout=10)
+        if r.status_code != 429:
+            r.raise_for_status()
+            data = r.json()
+            _CG_CACHE.update({"ts": now, "data": data})
+            return data
+        time.sleep(1.5 * (i + 1)) 
+
+    r.raise_for_status()
+
 
 def get_token_info() -> Dict[str, Dict]:
     from app.strategies.arbitrage_and_twap import TOKEN_INFO
     return TOKEN_INFO
+
 
 class CoingeckoClient(DexClient):
     name = "Coingecko"
@@ -30,8 +53,10 @@ class CoingeckoClient(DexClient):
     def _ensure_prices(self):
         if self.prices is None:
             data = fetch_top_100_tokens()
-            # symbol.lower() -> current_price (USD)
-            self.prices = { item["symbol"].lower(): Decimal(str(item["current_price"])) for item in data }
+            self.prices = {
+                item["symbol"].lower(): Decimal(str(item["current_price"]))
+                for item in data
+            }
 
     def _resolve(self, symbol: str) -> Tuple[str, int]:
         token_info = get_token_info()
@@ -54,3 +79,15 @@ class CoingeckoClient(DexClient):
 
     def swap(self, from_symbol: str, to_symbol: str, amount: Decimal) -> str:
         return ""
+
+def get_usd_per_qlk() -> float:
+    qlk_id = os.getenv("QLK_CG_ID", "quantlink")
+
+    base_url = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
+    url = f"{base_url}/simple/price"
+    params = {"ids": qlk_id, "vs_currencies": "usd"}
+    r = requests.get(url, params=params, headers=_CG_HEADERS, timeout=10)
+    r.raise_for_status()
+
+    data = r.json()
+    return float(data[qlk_id]["usd"])
