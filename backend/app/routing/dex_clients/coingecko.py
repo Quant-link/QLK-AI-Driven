@@ -1,7 +1,6 @@
 import os, time, requests
 from decimal import Decimal
 from typing import Tuple, Dict
-
 from app.routing.dex_clients.base import DexClient
 
 _CG_HEADERS = {"accept": "application/json"}
@@ -10,7 +9,8 @@ if _api_key:
     _CG_HEADERS["x-cg-pro-api-key"] = _api_key
 
 _CG_CACHE = {"ts": 0.0, "data": None}
-_CG_TTL = 300 
+_CG_TTL = 300  
+
 
 def fetch_top_100_tokens() -> list:
     now = time.time()
@@ -34,7 +34,7 @@ def fetch_top_100_tokens() -> list:
             data = r.json()
             _CG_CACHE.update({"ts": now, "data": data})
             return data
-        time.sleep(1.5 * (i + 1)) 
+        time.sleep(1.5 * (i + 1))
 
     r.raise_for_status()
 
@@ -42,6 +42,19 @@ def fetch_top_100_tokens() -> list:
 def get_token_info() -> Dict[str, Dict]:
     from app.strategies.arbitrage_and_twap import TOKEN_INFO
     return TOKEN_INFO
+
+
+def get_usd_per_qlk() -> float:
+    qlk_id = os.getenv("QLK_CG_ID", "quantlink")
+    base_url = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
+    url = f"{base_url}/simple/price"
+    params = {"ids": qlk_id, "vs_currencies": "usd"}
+
+    r = requests.get(url, params=params, headers=_CG_HEADERS, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+
+    return float(data.get(qlk_id, {}).get("usd", 0.0))
 
 
 class CoingeckoClient(DexClient):
@@ -64,30 +77,29 @@ class CoingeckoClient(DexClient):
         return info["address"], info["decimals"]
 
     def get_quote(self, from_symbol: str, to_symbol: str, amount: Decimal) -> Decimal:
-        self._ensure_prices()
         from_sym = from_symbol.lower()
         to_sym   = to_symbol.lower()
 
+        if (from_sym == "usdt" and to_sym == "qlk") or (from_sym == "qlk" and to_sym == "usdt"):
+            from app.strategies.arbitrage_and_twap import fetch_all_usd_prices 
+            prices = fetch_all_usd_prices()
+            qlk_price = Decimal(str(prices.get("qlk", 0)))
+            if qlk_price > 0:
+                if from_sym == "usdt":
+                    return amount / qlk_price   
+                else:
+                    return amount * qlk_price   
+            raise RuntimeError("CoingeckoClient: QLK price unavailable")
+
+        self._ensure_prices()
         if from_sym not in self.prices or to_sym not in self.prices:
             raise ValueError(f"Coingecko: Unsupported symbol {from_symbol} or {to_symbol}")
 
-        price_from = self.prices[from_sym]   
-        price_to   = self.prices[to_sym]     
+        price_from = self.prices[from_sym]
+        price_to   = self.prices[to_sym]
 
-        usd_value = amount * price_from      
+        usd_value = amount * price_from
         return usd_value / price_to
 
     def swap(self, from_symbol: str, to_symbol: str, amount: Decimal) -> str:
-        return ""
-
-def get_usd_per_qlk() -> float:
-    qlk_id = os.getenv("QLK_CG_ID", "quantlink")
-
-    base_url = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
-    url = f"{base_url}/simple/price"
-    params = {"ids": qlk_id, "vs_currencies": "usd"}
-    r = requests.get(url, params=params, headers=_CG_HEADERS, timeout=10)
-    r.raise_for_status()
-
-    data = r.json()
-    return float(data[qlk_id]["usd"])
+        return f"tx_coingecko_{from_symbol}_{to_symbol}_{amount}"
