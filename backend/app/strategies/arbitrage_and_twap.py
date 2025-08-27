@@ -525,14 +525,27 @@ def calculate_slippage(trade_size_usd: float, liquidity_usd: float) -> float:
     return min(slippage_factor * volatility_adjustment * 100, 50.0)  
 
 def fetch_all_usd_prices() -> dict:
+    import os, requests
+
     api_key = os.getenv("COINGECKO_API_KEY")
     base = os.getenv("COINGECKO_BASE_URL", "https://pro-api.coingecko.com/api/v3")
+    qlk_id = os.getenv("QLK_CG_ID", "quantlink")
 
     headers = {"accept": "application/json"}
     if api_key:
         headers["x-cg-pro-api-key"] = api_key
 
-    ids = ["ethereum", "tether", "usd-coin", "dai", "bitcoin", "chainlink", "uniswap", "aave", "quantlink"]
+    ids = [
+        "ethereum",
+        "tether",
+        "usd-coin",
+        "dai",
+        "bitcoin",
+        "chainlink",
+        "uniswap",
+        "aave",
+        qlk_id,
+    ]
 
     url = f"{base}/simple/price"
     params = {"ids": ",".join(ids), "vs_currencies": "usd"}
@@ -551,13 +564,24 @@ def fetch_all_usd_prices() -> dict:
             "link": float(data.get("chainlink", {}).get("usd") or 0),
             "uni": float(data.get("uniswap", {}).get("usd") or 0),
             "aave": float(data.get("aave", {}).get("usd") or 0),
-            "qlk": float(data.get("quantlink", {}).get("usd") or 0),
+            "qlk": float(data.get(qlk_id, {}).get("usd") or 0),  # env id’sine göre yakalanıyor
         }
 
         return prices
     except Exception as e:
         print("[CoinGecko Error]", e)
-        return {"eth": 1800.0, "usdt": 1.0, "usdc": 1.0, "dai": 1.0, "btc": 30000.0, "link": 7.0, "uni": 5.0, "aave": 60.0, "qlk": 1.0}
+        return {
+            "eth": 1800.0,
+            "usdt": 1.0,
+            "usdc": 1.0,
+            "dai": 1.0,
+            "btc": 30000.0,
+            "link": 7.0,
+            "uni": 5.0,
+            "aave": 60.0,
+            "qlk": 1.0,
+        }
+
 
 def fetch_price_from_1inch(from_symbol: str,
                            to_symbol: str,
