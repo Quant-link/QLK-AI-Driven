@@ -14,6 +14,7 @@ from app.ai.arbitrage_detector import detect_arbitrage
 from app.config.tokens import TOKENS
 from app.aggregator.price_feed import fetch_token_data_extended, fetch_gas_costs
 from app.routing.dex_clients.coingecko import get_usd_per_qlk
+import os, requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -523,22 +524,40 @@ def calculate_slippage(trade_size_usd: float, liquidity_usd: float) -> float:
     volatility_adjustment = 1.2  
     return min(slippage_factor * volatility_adjustment * 100, 50.0)  
 
-def fetch_all_usd_prices() -> dict[str, Decimal]:
+def fetch_all_usd_prices() -> dict:
+    api_key = os.getenv("COINGECKO_API_KEY")
+    base = os.getenv("COINGECKO_BASE_URL", "https://pro-api.coingecko.com/api/v3")
 
-    ids = ",".join(SYMBOL_TO_ID.values())
-    resp = requests.get(
-        "https://api.coingecko.com/api/v3/simple/price",
-        params={"ids": ids, "vs_currencies": "usd"},
-        timeout=10
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    prices: dict[str, Decimal] = {}
-    for sym, cg_id in SYMBOL_TO_ID.items():
-        price = data.get(cg_id, {}).get("usd")
-        if price is not None:
-            prices[sym] = Decimal(str(price))
-    return prices
+    headers = {"accept": "application/json"}
+    if api_key:
+        headers["x-cg-pro-api-key"] = api_key
+
+    ids = ["ethereum", "tether", "usd-coin", "dai", "bitcoin", "chainlink", "uniswap", "aave", "quantlink"]
+
+    url = f"{base}/simple/price"
+    params = {"ids": ",".join(ids), "vs_currencies": "usd"}
+
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json() or {}
+
+        prices = {
+            "eth": float(data.get("ethereum", {}).get("usd") or 0),
+            "usdt": float(data.get("tether", {}).get("usd") or 0),
+            "usdc": float(data.get("usd-coin", {}).get("usd") or 0),
+            "dai": float(data.get("dai", {}).get("usd") or 0),
+            "btc": float(data.get("bitcoin", {}).get("usd") or 0),
+            "link": float(data.get("chainlink", {}).get("usd") or 0),
+            "uni": float(data.get("uniswap", {}).get("usd") or 0),
+            "aave": float(data.get("aave", {}).get("usd") or 0),
+            "qlk": float(data.get("quantlink", {}).get("usd") or 0),
+        }
+
+        return prices
+    except Exception as e:
+        print("[CoinGecko Error]", e)
+        return {"eth": 1800.0, "usdt": 1.0, "usdc": 1.0, "dai": 1.0, "btc": 30000.0, "link": 7.0, "uni": 5.0, "aave": 60.0, "qlk": 1.0}
 
 def fetch_price_from_1inch(from_symbol: str,
                            to_symbol: str,
