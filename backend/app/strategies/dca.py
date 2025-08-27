@@ -1,9 +1,10 @@
 import time
 import argparse
+import threading
 from decimal import Decimal
-from typing import List, Dict, Tuple, Optional
-from fastapi import APIRouter
-import random
+from typing import List, Dict, Tuple, Optional, Any
+from fastapi import APIRouter, HTTPException, Query
+from datetime import datetime, timezone
 
 from app.routing.dex_clients.base import DexClient
 from app.routing.dex_clients.zerox import ZeroXClient
@@ -12,10 +13,37 @@ from app.routing.dex_clients.openocean import OpenOceanClient
 from app.routing.dex_clients.coingecko import CoingeckoClient
 from app.strategies.arbitrage_and_twap import fetch_all_usd_prices, TOKEN_INFO
 
+STATE: Dict[str, Dict] = {
+    "plans": {},   
+    "next_id": 1,  
+}
+RUNNING: Dict[str, bool] = {}           
+
+LOCK = threading.RLock()
+
+EXEC_LOG: list[dict[str, Any]] = []
+
+def _append_exec_log(entry: dict[str, Any]) -> None:
+    EXEC_LOG.append(entry)
+    if len(EXEC_LOG) > 1000:
+        del EXEC_LOG[: len(EXEC_LOG) - 1000]
+
+PRICE_POLL_SEC = 5          
+PRICE_TICKER_RUNNING = False
+
+def _new_plan_id() -> int:
+    with LOCK:
+        pid = STATE["next_id"]
+        STATE["next_id"] += 1
+        return pid
+
+
 class DCAStrategy:
-    def __init__(self, dex_clients: List[DexClient], usd_prices: Dict[str, Decimal]):
+    def __init__(self, dex_clients: List[DexClient], usd_prices: Dict[str, Decimal], plan_key: str, delay_seconds: int):
         self.dex_clients = dex_clients
         self.usd_prices = usd_prices
+        self.plan_key = plan_key
+        self.delay_seconds = delay_seconds
 
     def _fetch_best_quote(
         self,
@@ -23,17 +51,20 @@ class DCAStrategy:
         to_symbol: str,
         amount: Decimal
     ) -> Tuple[DexClient, Decimal]:
-        spot_price = self.usd_prices.get(from_symbol.lower())
-        if spot_price is None:
-            raise RuntimeError(f"No spot price for {from_symbol}")
+        spot_price = self.usd_prices.get(to_symbol.lower())
+        if spot_price is None or Decimal(spot_price) <= 0:
+            raise RuntimeError(f"No spot price for {to_symbol}")
         expected_qty = amount / spot_price
         best_pair: Optional[Tuple[DexClient, Decimal]] = None
         best_dev = Decimal('Infinity')
-        threshold = Decimal('1.0')
+        threshold = Decimal('1.0')  
+
         for dex in self.dex_clients:
             try:
                 quote = dex.get_quote(from_symbol, to_symbol, amount)
             except Exception:
+                continue
+            if quote is None or quote <= 0:
                 continue
             deviation = abs(quote - expected_qty) / expected_qty
             if deviation <= threshold:
@@ -54,94 +85,353 @@ class DCAStrategy:
     ) -> str:
         return dex.swap(from_symbol, to_symbol, amount)
 
+    def init_plan(
+        self,
+        token: str,
+        total_usd: Decimal,
+        total_intervals: int
+    ) -> Dict:
+        with LOCK:
+            existing = STATE["plans"].get(self.plan_key)
+            if existing:
+                return existing
+
+        try:
+            now_price_raw = fetch_all_usd_prices()
+            now_price_val = now_price_raw.get(token.lower(), now_price_raw.get("qlk", 0))
+            now_price = Decimal(str(now_price_val))
+        except Exception:
+            now_price = Decimal("0")
+
+        with LOCK:
+            existing = STATE["plans"].get(self.plan_key)
+            if existing:
+                return existing
+
+            plan_state = {
+                "id": _new_plan_id(),
+                "token": token.upper(),
+                "plan": self.plan_key,              
+                "status": "active",
+                "total_investment": float(total_usd),
+                "intervals_completed": 0,
+                "total_intervals": total_intervals,
+                "avg_buy_price": 0.0,               
+                "current_price": float(now_price),
+                "total_tokens": 0.0,
+                "current_value": 0.0,
+                "pnl": 0.0,
+                "pnl_percentage": 0.0,
+                "invested_so_far": 0.0,
+                "next_buy_in": self.delay_seconds // 60,  
+                "frequency": "interval",
+                "logs": []
+            }
+            STATE["plans"][self.plan_key] = plan_state
+            return plan_state
+
     def run(
         self,
         from_symbol: str,
         to_symbol: str,
         total_usd: Decimal,
-        intervals: int,
-        delay_seconds: int = 3600
+        intervals: int
     ):
         amount_per_trade = (total_usd / intervals).quantize(Decimal('0.0001'))
-        print(f"Starting DCA for {to_symbol.upper()}: {intervals} trades of {amount_per_trade} {from_symbol} each.")
+
+        plan_state = self.init_plan(
+            token=to_symbol,
+            total_usd=total_usd,
+            total_intervals=intervals
+        )
+
+        print(
+            f"Starting DCA for {to_symbol.upper()} ({self.plan_key}): {intervals} trades of {amount_per_trade} {from_symbol} each.",
+            flush=True
+        )
         for i in range(1, intervals + 1):
             try:
+                fresh_raw = fetch_all_usd_prices()
+                self.usd_prices = {k: Decimal(str(v)) for k, v in fresh_raw.items()}
+
                 dex, received = self._fetch_best_quote(from_symbol, to_symbol, amount_per_trade)
                 tx = self._execute_trade(dex, from_symbol, to_symbol, amount_per_trade)
-                received_str = format(received, 'f')
-                print(f"  {to_symbol.upper()} DCA {i}/{intervals}: Bought {received_str} on {dex.name}")
+
+                with LOCK:
+                    plan_state["intervals_completed"] += 1
+                    plan_state["total_tokens"] = float(Decimal(str(plan_state["total_tokens"])) + received)
+
+                    plan_state["invested_so_far"] = float(Decimal(str(plan_state["invested_so_far"])) + amount_per_trade)
+
+                    SIX = Decimal("0.000001")
+                    invested_so_far_dec = Decimal(str(plan_state["invested_so_far"]))
+                    total_tokens_dec    = Decimal(str(plan_state["total_tokens"]))
+                    avg_buy = (invested_so_far_dec / total_tokens_dec) if total_tokens_dec > 0 else Decimal("0")
+                    plan_state["avg_buy_price"] = float(avg_buy.quantize(SIX))
+
+                    plan_state["logs"].append({
+                        "interval": i,
+                        "dex": dex.name,
+                        "amount_usd": float(amount_per_trade),
+                        "tokens_received": float(received),
+                        "tx": tx,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+
+                unit_price = (amount_per_trade / received).quantize(Decimal("0.000001")) if received > 0 else Decimal(0)
+                _append_exec_log({
+                    "strategy": "DCA",
+                    "plan": self.plan_key,
+                    "token": to_symbol.upper(),
+                    "action": "Buy Order",
+                    "amount": float(amount_per_trade),
+                    "price": float(unit_price),
+                    "tokens": float(received),
+                    "dex": dex.name,
+                    "status": "success",
+                    "time": datetime.now(timezone.utc).isoformat(),
+                })
+
+                print(f"  {to_symbol.upper()} DCA {i}/{intervals}: Bought {received} on {dex.name}", flush=True)
+
             except Exception as err:
-                print(f"  {to_symbol.upper()} DCA {i}/{intervals} failed: {err}")
+                _append_exec_log({
+                    "strategy": "DCA",
+                    "plan": self.plan_key,
+                    "token": to_symbol.upper(),
+                    "action": "Buy Order",
+                    "amount": float(amount_per_trade),
+                    "price": None,
+                    "tokens": 0.0,
+                    "dex": "unknown",
+                    "status": "failed",
+                    "error": str(err),
+                    "time": datetime.now(timezone.utc).isoformat(),
+                })
+                print(f"  {to_symbol.upper()} DCA {i}/{intervals} failed: {err}", flush=True)
+
             if i < intervals:
-                time.sleep(delay_seconds)
-        print(f"Completed DCA for {to_symbol.upper()}.\n")
+                time.sleep(self.delay_seconds)
+
+        with LOCK:
+            plan_state["status"] = "completed"
+            plan_state["next_buy_in"] = 0
+        print(f"Completed DCA for {to_symbol.upper()} ({self.plan_key}).\n", flush=True)
+
 
 router = APIRouter()
 
-@router.get("/api/dca_data")
-def get_dca_data():
-    try:
+def _sorted_plans_list() -> List[Dict]:
+    def plan_steps(plan: Dict) -> int:
         try:
-            usd_prices = fetch_all_usd_prices()
-        except Exception as e:
-            print(f"[ERROR] DCA data fetch failed: {e}")
-            usd_prices = {
-                "bitcoin": 118000.0,
-                "ethereum": 3650.0,
-                "chainlink": 19.0,
-                "uniswap": 10.5,
-                "aave": 301.0,
-            }
+            return int(str(plan.get("plan","")).split("-")[1])
+        except Exception:
+            return 9999
+    with LOCK:
+        plans = list(STATE["plans"].values())
+    plans.sort(key=plan_steps)
+    return plans
 
-        dca_strategies = []
-
-        popular_tokens = ["eth", "btc", "link", "uni", "aave"]
-
-        token_mapping = {
-            "eth": "ethereum",
-            "btc": "bitcoin",
-            "link": "chainlink",
-            "uni": "uniswap",
-            "aave": "aave"
+def _precreate_plan(plan_key: str, token: str, total_usd: float, total_intervals: int, delay_seconds: int):
+    with LOCK:
+        if plan_key in STATE["plans"]:
+            del STATE["plans"][plan_key]
+        STATE["plans"][plan_key] = {
+            "id": _new_plan_id(),
+            "token": token.upper(),
+            "plan": plan_key,
+            "status": "active",
+            "total_investment": float(total_usd),
+            "intervals_completed": 0,
+            "total_intervals": int(total_intervals),
+            "avg_buy_price": 0.0,
+            "current_price": 0.0,
+            "total_tokens": 0.0,
+            "current_value": 0.0,
+            "pnl": 0.0,
+            "pnl_percentage": 0.0,
+            "invested_so_far": 0.0,
+            "next_buy_in": delay_seconds // 60,
+            "frequency": "interval",
+            "logs": []
         }
 
-        for token in popular_tokens:
-            coingecko_name = token_mapping.get(token, token)
-            if coingecko_name in usd_prices:
-                current_price = float(usd_prices[coingecko_name])
+def _apply_price_to_plans(spot_map: Dict[str, Decimal]) -> None:
+    TWO = Decimal("0.01")
+    SIX = Decimal("0.000001")
 
-                total_investment = random.uniform(1000, 10000)
-                intervals_completed = random.randint(5, 20)
-                total_intervals = random.randint(intervals_completed + 1, 30) 
-                avg_buy_price = current_price * random.uniform(0.85, 1.15)
-                total_tokens_bought = total_investment / avg_buy_price
-                current_value = total_tokens_bought * current_price
-                pnl = current_value - total_investment
-                pnl_percentage = (pnl / total_investment) * 100
+    with LOCK:
+        plans = list(STATE["plans"].values())
 
-                dca_strategies.append({
-                    "id": len(dca_strategies) + 1,
-                    "token": token.upper(),
-                    "status": "active" if intervals_completed < total_intervals else "completed",
-                    "total_investment": round(total_investment, 2),
-                    "intervals_completed": intervals_completed,
-                    "total_intervals": total_intervals,
-                    "avg_buy_price": round(avg_buy_price, 4),
-                    "current_price": round(current_price, 4),
-                    "total_tokens": round(total_tokens_bought, 6),
-                    "current_value": round(current_value, 2),
-                    "pnl": round(pnl, 2),
-                    "pnl_percentage": round(pnl_percentage, 2),
-                    "next_buy_in": random.randint(1, 24) if intervals_completed < total_intervals else None,
-                    "frequency": "daily"
-                })
+    for plan in plans:
+        token_l = plan["token"].lower()
+        spot = spot_map.get(token_l) or (spot_map.get("qlk") if plan["token"].upper() == "QLK" else None)
+        if spot is None:
+            continue
 
-        return {"strategies": dca_strategies}
+        total_tokens     = Decimal(str(plan.get("total_tokens", 0.0)))
+        invested_so_far  = Decimal(str(plan.get("invested_so_far", 0.0)))  
 
+        current_value = total_tokens * spot
+        pnl           = current_value - invested_so_far
+        pnl_pct       = (pnl / invested_so_far * Decimal(100)) if invested_so_far > 0 else Decimal(0)
+
+        with LOCK:
+            plan["current_price"]   = float(spot.quantize(SIX))
+            plan["current_value"]   = float(current_value.quantize(SIX))
+            plan["pnl"]             = float(pnl.quantize(SIX))
+            plan["pnl_percentage"]  = float(pnl_pct.quantize(SIX))
+            plan["invested_so_far"] = float(invested_so_far.quantize(TWO))
+
+def _price_ticker_loop():
+    while True:
+        try:
+            raw = fetch_all_usd_prices()
+            spot_map = {k: Decimal(str(v)) for k, v in raw.items()}
+            _apply_price_to_plans(spot_map)
+        except Exception as e:
+            print("[ticker] price fetch/apply error:", e, flush=True)
+        time.sleep(PRICE_POLL_SEC)
+
+def _start_ticker_if_needed():
+    global PRICE_TICKER_RUNNING
+    with LOCK:
+        if PRICE_TICKER_RUNNING:
+            return
+        PRICE_TICKER_RUNNING = True
+    t = threading.Thread(target=_price_ticker_loop, daemon=True)
+    t.start()
+
+@router.get("/api/dca_data")
+def get_dca_data():
+    _start_ticker_if_needed()
+
+    try:
+        with LOCK:
+            have_any_price = any(p.get("current_price") for p in STATE["plans"].values())
+        if not have_any_price:
+            raw = fetch_all_usd_prices()
+            spot_map = {k: Decimal(str(v)) for k, v in raw.items()}
+            _apply_price_to_plans(spot_map)
     except Exception as e:
-        print(f"[ERROR] DCA data fetch failed: {e}")
-        return {"strategies": []}
+        print("[/api/dca_data bootstrap price error]", e, flush=True)
 
+    return {"strategies": _sorted_plans_list()}
+
+def _run_plan_in_background(
+    plan_key: str,
+    from_symbol: str,
+    to_symbol: str,
+    total_usd: Decimal,
+    intervals: int,
+    delay_seconds: int
+):
+    with LOCK:
+        if RUNNING.get(plan_key):
+            return
+        RUNNING[plan_key] = True
+
+    try:
+        usd_prices_raw = fetch_all_usd_prices()
+        usd_prices = {k: Decimal(str(v)) for k, v in usd_prices_raw.items()}
+        dex_clients: List[DexClient] = [ZeroXClient(), OneInchClient(), OpenOceanClient(), CoingeckoClient()]
+        strategy = DCAStrategy(
+            dex_clients=dex_clients,
+            usd_prices=usd_prices,
+            plan_key=plan_key,
+            delay_seconds=delay_seconds
+        )
+        strategy.init_plan(token=to_symbol, total_usd=total_usd, total_intervals=intervals)
+        strategy.run(
+            from_symbol=from_symbol,
+            to_symbol=to_symbol,
+            total_usd=total_usd,
+            intervals=intervals
+        )
+    finally:
+        with LOCK:
+            RUNNING[plan_key] = False
+
+@router.post("/api/dca_start")
+def start_dca(
+    from_symbol: str = Query(default="USDT"),
+    to_symbol: str = Query(default="qlk"),
+    total_usd: float = Query(default=500.0),
+    intervals: int = Query(default=5, description="Allowed: 5, 10, 15"),
+    delay_seconds: int = Query(default=60)
+):
+    to_symbol = to_symbol.lower()
+    if to_symbol != "qlk":
+        raise HTTPException(status_code=400, detail="Only QLK is supported in this mode.")
+    if intervals not in (5, 10, 15):
+        raise HTTPException(status_code=400, detail="intervals must be one of 5, 10, 15.")
+
+    plan_key = f"{to_symbol.upper()}-{intervals}"
+
+    _precreate_plan(plan_key, to_symbol, total_usd, intervals, delay_seconds)
+
+    _start_ticker_if_needed()
+
+    t = threading.Thread(
+        target=_run_plan_in_background,
+        kwargs=dict(
+            plan_key=plan_key,
+            from_symbol=from_symbol,
+            to_symbol=to_symbol,
+            total_usd=Decimal(str(total_usd)),
+            intervals=intervals,
+            delay_seconds=delay_seconds
+        ),
+        daemon=True
+    )
+    t.start()
+
+    return {"status": "DCA started", "token": to_symbol.upper(), "plan": plan_key}
+
+@router.post("/api/dca_start_all")
+def start_dca_all(
+    from_symbol: str = Query(default="USDT"),
+    to_symbol: str = Query(default="qlk"),
+    total_usd_5: float = Query(default=500.0),
+    total_usd_10: float = Query(default=500.0),
+    total_usd_15: float = Query(default=500.0),
+    delay_seconds: int = Query(default=60)
+):
+    to_symbol = to_symbol.lower()
+    if to_symbol != "qlk":
+        raise HTTPException(status_code=400, detail="Only QLK is supported in this mode.")
+
+    _start_ticker_if_needed()
+
+    results = []
+    for intervals, amt in [(5, total_usd_5), (10, total_usd_10), (15, total_usd_15)]:
+        plan_key = f"{to_symbol.upper()}-{intervals}"
+
+        _precreate_plan(plan_key, to_symbol, amt, intervals, delay_seconds)
+
+        t = threading.Thread(
+            target=_run_plan_in_background,
+            kwargs=dict(
+                plan_key=plan_key,
+                from_symbol=from_symbol,
+                to_symbol=to_symbol,
+                total_usd=Decimal(str(amt)),
+                intervals=intervals,
+                delay_seconds=delay_seconds
+            ),
+            daemon=True
+        )
+        t.start()
+
+        results.append({"plan": plan_key, "status": "DCA started", "token": to_symbol.upper(), "total_usd": amt})
+
+    return {"started": results}
+
+@router.get("/api/execution_log")
+def get_execution_log(limit: int = Query(default=100, ge=1, le=1000)):
+    with LOCK:
+        data = EXEC_LOG[-limit:]
+    return {"items": data[::-1]}
 
 def main():
     parser = argparse.ArgumentParser(
@@ -153,39 +443,45 @@ def main():
         help="Total USD amount to spend per token"
     )
     parser.add_argument(
-        "--intervals", dest="intervals", default=1,
+        "--intervals", dest="intervals", default=5,
         type=int,
-        help="Number of DCA intervals per token"
+        help="Number of DCA intervals per token (suggested: 5, 10, 15)"
     )
     parser.add_argument(
-        "--delay", dest="delay_seconds", default=3600,
+        "--delay", dest="delay_seconds", default=60,
         type=int,
         help="Delay between intervals in seconds"
     )
     parser.add_argument(
-        "--tokens", dest="tokens", nargs="*", default=["all"],
-        help="List of target symbols or 'all' for every token"
+        "--tokens", dest="tokens", nargs="*", default=["qlk"],
+        help="List of target symbols (here: only 'qlk')"
     )
     args = parser.parse_args()
 
-    usd_prices = fetch_all_usd_prices()
+    usd_prices_raw = fetch_all_usd_prices()
+    usd_prices = {k: Decimal(str(v)) for k, v in usd_prices_raw.items()}
+
     dex_clients: List[DexClient] = [
         ZeroXClient(), OneInchClient(), OpenOceanClient(), CoingeckoClient()
     ]
-    strategy = DCAStrategy(dex_clients=dex_clients, usd_prices=usd_prices)
     from_symbol = "USDT"
 
     targets = args.tokens
-    if "all" in targets:
-        targets = [sym for sym in TOKEN_INFO if sym.lower() != from_symbol.lower()]
     for to_symbol in targets:
+        plan_key = f"{to_symbol.upper()}-{args.intervals}"
+        strategy = DCAStrategy(
+            dex_clients=dex_clients,
+            usd_prices=usd_prices,
+            plan_key=plan_key,
+            delay_seconds=args.delay_seconds
+        )
         strategy.run(
             from_symbol=from_symbol,
             to_symbol=to_symbol,
             total_usd=args.total_usd,
-            intervals=args.intervals,
-            delay_seconds=args.delay_seconds
+            intervals=args.intervals
         )
+
 
 if __name__ == "__main__":
     main()
