@@ -13,11 +13,6 @@ from app.routing.dex_clients.coingecko import CoingeckoClient
 from app.strategies.arbitrage_and_twap import fetch_all_usd_prices, TOKEN_INFO
 
 class DCAStrategy:
-    """
-    Dollar-Cost Averaging strategy with multi-DEX fallback and sanity checks:
-    - Prioritizes 0x price endpoint, then 1inch, then OpenOcean, finally Coingecko spot price.
-    - Filters out quotes deviating >100% from spot market; uses least-deviant if all exceed threshold.
-    """
     def __init__(self, dex_clients: List[DexClient], usd_prices: Dict[str, Decimal]):
         self.dex_clients = dex_clients
         self.usd_prices = usd_prices
@@ -81,20 +76,15 @@ class DCAStrategy:
                 time.sleep(delay_seconds)
         print(f"Completed DCA for {to_symbol.upper()}.\n")
 
-# API Router for DCA Strategy
 router = APIRouter()
 
 @router.get("/api/dca_data")
 def get_dca_data():
-    """
-    DCA stratejisi verilerini döndürür
-    """
     try:
         try:
             usd_prices = fetch_all_usd_prices()
         except Exception as e:
             print(f"[ERROR] DCA data fetch failed: {e}")
-            # CoinGecko rate limit durumunda fallback fiyatlar kullan
             usd_prices = {
                 "bitcoin": 118000.0,
                 "ethereum": 3650.0,
@@ -103,13 +93,10 @@ def get_dca_data():
                 "aave": 301.0,
             }
 
-        # DCA stratejisi için örnek veriler
         dca_strategies = []
 
-        # Popüler tokenlar için DCA stratejileri oluştur
         popular_tokens = ["eth", "btc", "link", "uni", "aave"]
 
-        # Token ismi mapping'i
         token_mapping = {
             "eth": "ethereum",
             "btc": "bitcoin",
@@ -119,15 +106,13 @@ def get_dca_data():
         }
 
         for token in popular_tokens:
-            # Token mapping kullanarak doğru ismi bul
             coingecko_name = token_mapping.get(token, token)
             if coingecko_name in usd_prices:
                 current_price = float(usd_prices[coingecko_name])
 
-                # DCA parametreleri
                 total_investment = random.uniform(1000, 10000)
                 intervals_completed = random.randint(5, 20)
-                total_intervals = random.randint(intervals_completed + 1, 30)  # En az 1 fazla olsun
+                total_intervals = random.randint(intervals_completed + 1, 30) 
                 avg_buy_price = current_price * random.uniform(0.85, 1.15)
                 total_tokens_bought = total_investment / avg_buy_price
                 current_value = total_tokens_bought * current_price
