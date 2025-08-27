@@ -13,9 +13,12 @@ def main():
     route = get_best_route(args.from_token.upper(), args.to_token.upper(), args.amount)
 
     if route:
-        print(f"\n✅ Best Route Found via {route['source']}")
-        print(f"  Expected Output: {route['expectedAmountOut']} {args.to_token}")
-        print(f"  Path: {route['path']}")
+        print(f"\n✅ Best Route Found via {route.get('source')}")
+        if 'bestDex' in route:
+            print(f"  Best DEX: {route['bestDex']}")
+        print(f"  Expected Output: {route.get('expectedAmountOut')} {args.to_token.upper()}")
+        if 'path' in route:
+            print(f"  Path: {route['path']}")
     else:
         print("❌ No optimal route found.")
 
