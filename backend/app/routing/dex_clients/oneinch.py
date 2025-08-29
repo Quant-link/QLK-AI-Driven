@@ -4,7 +4,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
-
+from app.config.tokens import TOKENS
 load_dotenv()
 
 CHAIN_ID = int(os.getenv("ONEINCH_CHAIN_ID", "1"))
@@ -207,30 +207,61 @@ class OneInchClient:
         _ = _symbol_to_address()
 
     def _resolve_symbol(self, symbol: str) -> Tuple[str, int]:
-        m = _symbol_to_address()
-        key = symbol.upper()
-        if key not in m:
-            raise ValueError(f"Unsupported token symbol for 1inch: {symbol}")
-        return m[key]
+        sym = symbol.upper()
+        if sym not in TOKENS:
+            raise KeyError(f"Token {sym} not found in TOKENS")
+        info = TOKENS[sym]
+        return info["address"], info["decimals"]
 
     def get_quote(self, from_symbol: str, to_symbol: str, amount: Decimal) -> Decimal:
+            from_symbol = from_symbol.upper()
+            to_symbol = to_symbol.upper()
+
+            from_addr, from_dec = self._resolve_symbol(from_symbol)
+            to_addr, to_dec     = self._resolve_symbol(to_symbol)
+
+            amount_wei = int(Decimal(amount) * (Decimal(10) ** from_dec))
+            params = {"src": from_addr, "dst": to_addr, "amount": str(amount_wei)}
+            r = requests.get(QUOTE_URL, headers=HEADERS, params=params, timeout=20)
+            r.raise_for_status()
+            q = r.json() or {}
+
+            to_amount_raw = q.get("toAmount") or 0
+            try:
+                to_amount_raw = int(to_amount_raw)
+            except Exception:
+                to_amount_raw = 0
+
+            tdec = int((q.get("toToken") or {}).get("decimals", to_dec))
+            return Decimal(to_amount_raw) / (Decimal(10) ** tdec)
+
+    def swap(self, from_symbol: str, to_symbol: str, amount: Decimal) -> str:
+        from_symbol = from_symbol.upper()
+        to_symbol   = to_symbol.upper()
+
         from_addr, from_dec = self._resolve_symbol(from_symbol)
-        to_addr, to_dec     = self._resolve_symbol(to_symbol)
+        to_addr, _to_dec    = self._resolve_symbol(to_symbol)
 
-        amount_wei = int(Decimal(amount) * (Decimal(10) ** from_dec))
-        params = {"src": from_addr, "dst": to_addr, "amount": str(amount_wei)}
-        r = requests.get(QUOTE_URL, headers=HEADERS, params=params, timeout=20)
+        sell_amount = int(Decimal(amount) * (Decimal(10) ** from_dec))
+
+        params = {
+            "src": from_addr,
+            "dst": to_addr,
+            "amount": str(sell_amount),
+            "from": os.getenv("SIM_FROM_ADDRESS", ""),  
+            "slippage": os.getenv("SLIPPAGE_BPS", "1"),
+            "disableEstimate": "true",                 
+            "allowPartialFill": "false"               
+        }
+
+        r = requests.get(SWAP_URL, headers=HEADERS, params=params, timeout=20)
         r.raise_for_status()
-        q = r.json() or {}
+        data = r.json() or {}
 
-        to_amount_raw = q.get("toAmount") or 0
-        try:
-            to_amount_raw = int(to_amount_raw)
-        except Exception:
-            to_amount_raw = 0
+        tx = data.get("tx")
+        if tx and isinstance(tx, dict):
+            return f"{tx.get('to')}?data={tx.get('data')}"
+        if "to" in data and "data" in data:
+            return f"{data['to']}?data={data['data']}"
 
-        tdec = int((q.get("toToken") or {}).get("decimals", to_dec))
-        return Decimal(to_amount_raw) / (Decimal(10) ** tdec)
-
-    def swap(self, *args, **kwargs):
-        raise NotImplementedError("On-chain swap is not implemented in this backend.")
+        return str(data)
