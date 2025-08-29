@@ -180,8 +180,6 @@ def get_openocean_quote(
         "source": "OpenOcean",
     }
 
-# ----------------------- Backward-compatible Client (shim) -----------------------
-
 class OpenOceanClient:
     name = "OpenOcean"
 
