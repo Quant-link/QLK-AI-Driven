@@ -1,8 +1,9 @@
+import os
 import requests
 from decimal import Decimal
 from typing import Dict, Any, Optional, Tuple, List
 
-from app.strategies.arbitrage_and_twap import TOKEN_INFO
+from app.config.tokens import TOKENS, get_token
 
 OPENOCEAN_QUOTE_URL = "https://open-api.openocean.finance/v3/eth/quote"
 
@@ -25,18 +26,63 @@ DEX_LABELS: Dict[str, str] = {
 def _pretty(name: Optional[str]) -> Optional[str]:
     if not name:
         return None
-    k = name.upper().replace(" ", "_").replace("-", "_")
+    k = str(name).upper().replace(" ", "_").replace("-", "_")
     return DEX_LABELS.get(k, name)
 
+def _rpc_get_decimals(address: str) -> Optional[int]:
+    ETH_RPC_URL = os.getenv("ETH_RPC_URL") or os.getenv("ETHEREUM_RPC_URL")
+    if not ETH_RPC_URL:
+        return None
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+                { "to": address, "data": "0x313ce567" },
+                "latest"
+            ]
+        }
+        r = requests.post(ETH_RPC_URL, json=payload, timeout=10)
+        r.raise_for_status()
+        result = r.json().get("result")
+        if result and result != "0x":
+            return int(result, 16)
+    except Exception:
+        pass
+    return None
+
 def _resolve(symbol: str) -> Tuple[str, int]:
-    key = symbol.lower()
-    if key not in TOKEN_INFO:
-        raise ValueError(f"Unsupported token: {symbol}")
-    info = TOKEN_INFO[key]
-    return info["address"], int(info["decimals"])
+    sym = (symbol or "").upper()
+    rec = TOKENS.get(sym)
+
+    if rec and rec.get("address"):
+        return rec["address"], int(rec.get("decimals", 18))
+
+    if sym == "QLK":
+        from app.routing.dex_clients.coingecko import fetch_token_on_ethereum_by_cgid
+        cg_id = os.getenv("QLK_CG_ID")  # örn. "quantlink"
+        cg_tok = fetch_token_on_ethereum_by_cgid(cg_id) if cg_id else None
+        if cg_tok and cg_tok.get("address"):
+            TOKENS["QLK"] = {"symbol": "QLK", "chain": "ethereum",
+                             "address": cg_tok["address"], "decimals": int(cg_tok["decimals"])}
+            return cg_tok["address"], int(cg_tok["decimals"])
+        addr = os.getenv("QLK_ADDRESS_ETHEREUM")
+        if not addr:
+            raise ValueError("QLK contract not found via CoinGecko and QLK_ADDRESS_ETHEREUM is not set.")
+        dec = int(os.getenv("QLK_DECIMALS") or 18)
+        TOKENS["QLK"] = {"symbol": "QLK", "chain": "ethereum", "address": addr, "decimals": dec}
+        return addr, dec
+
+    raise ValueError(f"Unsupported token symbol (not in TOKENS and no CG/env path): {symbol}")
+
+def _amount_to_base_units(amount: float, decimals: int) -> str:
+    quant = Decimal(str(amount)) * (Decimal(10) ** int(decimals))
+    if quant.is_nan() or quant < 0:
+        return "0"
+    return str(int(quant))
 
 def _extract_best_dex_from_oo(data: Dict[str, Any]) -> Optional[str]:
-    # 1) protocols
     protos = data.get("protocols")
     if isinstance(protos, list) and protos:
         flat: List[Dict[str, Any]] = []
@@ -55,7 +101,6 @@ def _extract_best_dex_from_oo(data: Dict[str, Any]) -> Optional[str]:
             if p:
                 return p
 
-    # 2) routes / route / pathList / paths / legs
     for key in ("routes", "route", "pathList", "paths", "legs"):
         rv = data.get(key)
         if isinstance(rv, list) and rv:
@@ -66,7 +111,6 @@ def _extract_best_dex_from_oo(data: Dict[str, Any]) -> Optional[str]:
                 if p:
                     return p
 
-    # 3) routers: ["UNISWAP_V3", ...]
     routers = data.get("routers")
     if isinstance(routers, list) and routers:
         p = _pretty(str(routers[0]))
@@ -79,12 +123,13 @@ def get_openocean_quote(
     from_id: str,
     to_id: str,
     amount: float,
+    from_decimals: int,
     protocols: Optional[List[str]] = None,
 ) -> dict:
     params = {
         "inTokenAddress": from_id,
         "outTokenAddress": to_id,
-        "amount": str(int(Decimal(str(amount)) * (Decimal(10) ** 18))),
+        "amount": _amount_to_base_units(amount, from_decimals),
         "slippage": 1,
     }
     if protocols:
@@ -95,19 +140,22 @@ def get_openocean_quote(
     payload = resp.json() or {}
     data = payload.get("data") or {}
 
-    # outAmount & decimals
-    raw_out = int(data.get("outAmount", 0))
+    raw_out = 0
+    try:
+        raw_out = int(data.get("outAmount", 0))
+    except Exception:
+        raw_out = 0
+
     out_token = data.get("outToken") or {}
     try:
         to_dec = int(out_token.get("decimals", 18))
     except Exception:
         to_dec = 18
-    expected_out = float(Decimal(raw_out) / (Decimal(10) ** to_dec))
 
-    # dex etiketi
+    expected_out = float(Decimal(raw_out) / (Decimal(10) ** to_dec)) if raw_out else 0.0
+
     dex_label = _extract_best_dex_from_oo(data)
 
-    # gas info
     est_gas = None
     gas_price = None
     if isinstance(data.get("estimatedGas"), (int, str)):
@@ -138,15 +186,21 @@ class OpenOceanClient:
     name = "OpenOcean"
 
     def __init__(self):
-        _ = TOKEN_INFO
+        pass 
 
     def get_quote(self, from_symbol: str, to_symbol: str, amount: Decimal) -> Decimal:
+        # normalize
+        from_symbol = from_symbol.upper()
+        to_symbol = to_symbol.upper()
+
         from_addr, from_dec = _resolve(from_symbol)
-        to_addr, to_dec     = _resolve(to_symbol)
-        amt_float = float(amount) 
-        data = get_openocean_quote(from_addr, to_addr, amt_float, protocols=None)
-
+        to_addr, _to_dec = _resolve(to_symbol)
+        amt_float = float(amount)
+        data = get_openocean_quote(
+            from_addr,
+            to_addr,
+            amt_float,
+            from_decimals=from_dec,
+            protocols=None
+        )
         return Decimal(str(data.get("expectedAmountOut", 0)))
-
-    def swap(self, *args, **kwargs):
-        raise NotImplementedError("On-chain swap is not implemented in this backend.")
