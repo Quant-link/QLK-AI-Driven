@@ -58,15 +58,21 @@ const DEX_LABEL: Record<string, string> = {
   raydium: "Raydium",
   pancakeswap: "PancakeSwap",
   osmosis: "Osmosis",
+  oneinch: "1inch",
+  openocean: "OpenOcean",
 };
+function shortenAddress(addr: string, chars = 6): string {
+  if (!addr) return "";
+  return addr.slice(0, chars) + "..." + addr.slice(-chars);
+}
 
 export function RecentOpportunitiesTable() {
   interface Opportunity {
     id: number;
     tokenA: string;
     tokenB: string;
-    dexA: string; // lowercase id
-    dexB: string; // lowercase id
+    dexA: string;
+    dexB: string;
     profitQLK: number;
     profitUSD: number;
     profitPercentage: number;
@@ -167,11 +173,15 @@ export function RecentOpportunitiesTable() {
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                        <div className="text-sm font-medium">{DEX_LABEL[o.dexA] ?? o.dexA}</div>
-                        <div className="text-xs text-muted-foreground flex items-center">
-                          <span>→</span>
-                          <span className="ml-1">{DEX_LABEL[o.dexB] ?? o.dexB}</span>
-                        </div>
+                      <div className="text-sm font-medium">
+                        {DEX_LABEL[o.dexA] ? DEX_LABEL[o.dexA] : shortenAddress(o.dexA)}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center">
+                        <span>→</span>
+                        <span className="ml-1">
+                          {DEX_LABEL[o.dexB] ? DEX_LABEL[o.dexB] : shortenAddress(o.dexB)}
+                        </span>
+                      </div>
                       </div>
                     </TableCell>
                     <TableCell>
