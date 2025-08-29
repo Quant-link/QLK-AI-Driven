@@ -10,8 +10,8 @@ from app.routing.dex_clients.base import DexClient
 from app.routing.dex_clients.zerox import ZeroXClient
 from app.routing.dex_clients.oneinch import OneInchClient
 from app.routing.dex_clients.openocean import OpenOceanClient
-from app.routing.dex_clients.coingecko import CoingeckoClient
-from app.strategies.arbitrage_and_twap import fetch_all_usd_prices, TOKEN_INFO
+from app.strategies.arbitrage_and_twap import fetch_all_usd_prices
+from app.config.tokens import TOKENS 
 
 STATE: Dict[str, Dict] = {
     "plans": {},   
@@ -51,17 +51,24 @@ class DCAStrategy:
         to_symbol: str,
         amount: Decimal
     ) -> Tuple[DexClient, Decimal]:
-        spot_price = self.usd_prices.get(to_symbol.lower())
-        if spot_price is None or Decimal(spot_price) <= 0:
+        from_price = self.usd_prices.get(from_symbol.lower()) or self.usd_prices.get(from_symbol.upper())
+        to_price   = self.usd_prices.get(to_symbol.lower())   or self.usd_prices.get(to_symbol.upper())
+
+        if to_price is None or Decimal(to_price) <= 0:
             raise RuntimeError(f"No spot price for {to_symbol}")
-        expected_qty = amount / spot_price
+
+        if from_price is None or Decimal(from_price) <= 0:
+            expected_qty = amount / Decimal(to_price)
+        else:
+            expected_qty = amount * (Decimal(str(from_price)) / Decimal(str(to_price)))
+
         best_pair: Optional[Tuple[DexClient, Decimal]] = None
         best_dev = Decimal('Infinity')
-        threshold = Decimal('1.0')  
+        threshold = Decimal('1.0')
 
         for dex in self.dex_clients:
             try:
-                quote = dex.get_quote(from_symbol, to_symbol, amount)
+                quote = dex.get_quote(from_symbol.upper(), to_symbol.upper(), amount)
             except Exception:
                 continue
             if quote is None or quote <= 0:
@@ -72,9 +79,17 @@ class DCAStrategy:
             if deviation < best_dev:
                 best_dev = deviation
                 best_pair = (dex, quote)
+
         if best_pair:
             return best_pair
-        raise RuntimeError(f"No valid quotes for {from_symbol}->{to_symbol}")
+
+        if from_price is not None and to_price is not None:
+            fallback_qty = amount * (Decimal(str(from_price)) / Decimal(str(to_price)))
+            print(f"[FALLBACK] Using spot price for {from_symbol}->{to_symbol} = {fallback_qty}")
+            return self.dex_clients[0], fallback_qty
+
+        raise RuntimeError(f"No valid quotes and no fallback price for {from_symbol}->{to_symbol}")
+
 
     def _execute_trade(
         self,
@@ -83,7 +98,7 @@ class DCAStrategy:
         to_symbol: str,
         amount: Decimal
     ) -> str:
-        return dex.swap(from_symbol, to_symbol, amount)
+        return dex.swap(from_symbol.upper(), to_symbol.upper(), amount)
 
     def init_plan(
         self,
@@ -152,7 +167,7 @@ class DCAStrategy:
         for i in range(1, intervals + 1):
             try:
                 fresh_raw = fetch_all_usd_prices()
-                self.usd_prices = {k: Decimal(str(v)) for k, v in fresh_raw.items()}
+                self.usd_prices = {k.lower(): Decimal(str(v)) for k, v in fresh_raw.items()}
 
                 dex, received = self._fetch_best_quote(from_symbol, to_symbol, amount_per_trade)
                 tx = self._execute_trade(dex, from_symbol, to_symbol, amount_per_trade)
@@ -333,8 +348,8 @@ def _run_plan_in_background(
 
     try:
         usd_prices_raw = fetch_all_usd_prices()
-        usd_prices = {k: Decimal(str(v)) for k, v in usd_prices_raw.items()}
-        dex_clients: List[DexClient] = [ZeroXClient(), OneInchClient(), OpenOceanClient(), CoingeckoClient()]
+        usd_prices = {k.lower(): Decimal(str(v)) for k, v in usd_prices_raw.items()}
+        dex_clients: List[DexClient] = [ZeroXClient(), OneInchClient(), OpenOceanClient()]
         strategy = DCAStrategy(
             dex_clients=dex_clients,
             usd_prices=usd_prices,
@@ -459,10 +474,10 @@ def main():
     args = parser.parse_args()
 
     usd_prices_raw = fetch_all_usd_prices()
-    usd_prices = {k: Decimal(str(v)) for k, v in usd_prices_raw.items()}
+    usd_prices = {k.lower(): Decimal(str(v)) for k, v in usd_prices_raw.items()}
 
     dex_clients: List[DexClient] = [
-        ZeroXClient(), OneInchClient(), OpenOceanClient(), CoingeckoClient()
+        ZeroXClient(), OneInchClient(), OpenOceanClient()
     ]
     from_symbol = "USDT"
 
