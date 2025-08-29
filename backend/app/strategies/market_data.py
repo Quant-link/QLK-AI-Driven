@@ -1,23 +1,17 @@
 from decimal import Decimal
 from fastapi import APIRouter
-from app.strategies.arbitrage_and_twap import fetch_all_usd_prices, TOKEN_INFO
+from app.strategies.arbitrage_and_twap import fetch_all_usd_prices
 from app.config.tokens import TOKENS
 from app.aggregator.price_feed import fetch_token_data
 import random
 
-# API Router for Market Data
 router = APIRouter()
 
 @router.get("/api/market_data")
 def get_market_data():
-    """
-    Token market data verilerini döndürür - Market Data sayfasındaki token overview tablosu için
-    """
     try:
-        # CoinGecko rate limit sorununu çözmek için direkt token listesi kullan
         market_data = []
 
-        # Popüler tokenlar ve fiyatları (gerçek projede cache'lenmiş veriler kullanılabilir)
         popular_tokens = {
             "BTC": 118000.0,
             "ETH": 3650.0,
@@ -42,20 +36,15 @@ def get_market_data():
         }
 
         for symbol, current_price in popular_tokens.items():
-            # Token verilerini DexScreener'dan çek
             token_data = fetch_token_data(symbol)
-
-            # Varsayılan değerler
             liquidity = 0
             volume_24h = 0
 
             if token_data and len(token_data) > 0:
-                # En yüksek likiditeye sahip pair'i al
                 best_pair = max(token_data, key=lambda x: x.get('liquidity', 0))
                 liquidity = best_pair.get('liquidity', 0)
                 volume_24h = best_pair.get('volume', 0)
 
-            # Eğer gerçek veri yoksa realistic değerler kullan
             if liquidity == 0:
                 if symbol in ["BTC", "ETH"]:
                     liquidity = random.uniform(50000000, 200000000)
@@ -72,13 +61,12 @@ def get_market_data():
                 else:
                     volume_24h = random.uniform(500000, 20000000)
 
-            # Market cap hesaplama
             if symbol in ["BTC"]:
-                market_cap = current_price * 19700000  # BTC supply
+                market_cap = current_price * 19700000 
             elif symbol in ["ETH", "WETH"]:
-                market_cap = current_price * 120000000  # ETH supply
+                market_cap = current_price * 120000000 
             elif symbol in ["USDT", "USDC", "DAI"]:
-                market_cap = random.uniform(80000000000, 120000000000)  # Stablecoin market caps
+                market_cap = random.uniform(80000000000, 120000000000) 
             else:
                 market_cap = random.uniform(1000000000, 50000000000)
 
@@ -115,9 +103,6 @@ def get_market_data():
 
 @router.get("/api/token_details/{symbol}")
 def get_token_details(symbol: str):
-    """
-    Belirli bir token için detaylı bilgi döndürür
-    """
     try:
         usd_prices = fetch_all_usd_prices()
         
@@ -127,7 +112,6 @@ def get_token_details(symbol: str):
         current_price = float(usd_prices[symbol.lower()])
         token_data = fetch_token_data(symbol)
         
-        # Detaylı token bilgileri
         details = {
             "symbol": symbol.upper(),
             "name": symbol.upper(),
