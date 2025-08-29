@@ -11,7 +11,6 @@ def main():
 
     usd_prices = fetch_all_usd_prices()
 
-    # Başlık
     print(f"{'SYMBOL':<10} {'ENTRY':>10} {'STOP-LOSS':>12} {'SIZE':>12}")
     print("-" * 46)
 
@@ -33,7 +32,6 @@ def main():
 
         print(f"{sym:<10} {e_str:>10} {s_str:>12} {z_str:>12}")
 
-# ✅ FastAPI endpoint'i için JSON döndüren fonksiyon
 def get_risk_data_as_json():
     total_usd = Decimal("10000")
     risk_pct = Decimal("2")
