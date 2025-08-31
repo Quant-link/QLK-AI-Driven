@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +14,28 @@ interface Token {
   volatility: number;
   change24h: number;
 }
+
+const toNum = (v: unknown): number | null => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const fmtPct = (v: unknown, digits = 2): string => {
+  const n = toNum(v);
+  return n === null ? "—" : `${n.toFixed(digits)}%`;
+};
+
+const fmtCurrency = (v: unknown): string => {
+  const n = toNum(v);
+  if (n === null) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  }).format(n);
+};
+
 
 export function VolatilityAlert() {
   const [tokens, setTokens] = useState<Token[]>([]);
@@ -87,7 +108,7 @@ export function VolatilityAlert() {
                     variant="outline"
                     className="border-yellow-400 text-yellow-800 dark:text-yellow-100 text-xs"
                   >
-                    {token.volatility.toFixed(1)}%
+                    {fmtPct(token.volatility, 1)}
                   </Badge>
                   {token.change24h >= 0 ? (
                     <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 text-green-600" />
@@ -96,7 +117,7 @@ export function VolatilityAlert() {
                   )}
                 </div>
                 <div className="text-xs sm:text-sm font-medium text-yellow-900 dark:text-yellow-100">
-                  ${token.price.toFixed(token.price < 1 ? 4 : 2)}
+                  {fmtCurrency(token.price)}
                 </div>
                 <div
                   className={`text-xs ${
@@ -106,7 +127,7 @@ export function VolatilityAlert() {
                   }`}
                 >
                   {token.change24h >= 0 ? "+" : ""}
-                  {token.change24h.toFixed(2)}%
+                  {fmtPct(token.change24h, 2)}
                 </div>
               </div>
             </div>
