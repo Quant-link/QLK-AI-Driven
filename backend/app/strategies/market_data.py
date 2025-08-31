@@ -1,136 +1,177 @@
-from decimal import Decimal
+import os
+import requests
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter
-from app.strategies.arbitrage_and_twap import fetch_all_usd_prices
 from app.config.tokens import TOKENS
-from app.aggregator.price_feed import fetch_token_data
-import random
 
 router = APIRouter()
 
-@router.get("/api/market_data")
-def get_market_data():
-    try:
-        market_data = []
+CG_BASE_URL = os.getenv("COINGECKO_BASE_URL", "https://pro-api.coingecko.com/api/v3")
+CG_HEADERS = {"accept": "application/json"}
+CG_KEY = os.getenv("COINGECKO_API_KEY")
+if CG_KEY:
+    CG_HEADERS["x-cg-pro-api-key"] = CG_KEY
 
-        popular_tokens = {
-            "BTC": 118000.0,
-            "ETH": 3650.0,
-            "USDT": 1.0,
-            "USDC": 1.0,
-            "BNB": 720.0,
-            "SOL": 240.0,
-            "XRP": 2.8,
-            "DOGE": 0.38,
-            "ADA": 1.05,
-            "LINK": 19.0,
-            "UNI": 10.5,
-            "AAVE": 301.0,
-            "CRV": 0.94,
-            "DAI": 1.0,
-            "NEAR": 2.93,
-            "WBTC": 118000.0,
-            "WETH": 3650.0,
-            "STETH": 3640.0,
-            "WSTETH": 4400.0,
-            "FLOKI": 0.000143
+def fetch_from_coingecko(cg_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        url = f"{CG_BASE_URL}/coins/{cg_id}"
+        res = requests.get(url, headers=CG_HEADERS, timeout=15)
+        if res.status_code != 200:
+            print(f"[WARN] CG {cg_id} {res.status_code}")
+            return None
+        data = res.json()
+        market = data.get("market_data", {}) or {}
+
+        price = (market.get("current_price") or {}).get("usd")
+        high_24h = (market.get("high_24h") or {}).get("usd")
+        low_24h = (market.get("low_24h") or {}).get("usd")
+
+        volatility = None
+        if high_24h and low_24h and price:
+            try:
+                volatility = (high_24h - low_24h) / price
+            except Exception:
+                volatility = None
+
+        return {
+            "id": data.get("id"),
+            "symbol": (data.get("symbol") or "").upper(),
+            "name": data.get("name"),
+            "price": price,
+            "change_24h": market.get("price_change_percentage_24h"),
+            "change_7d": market.get("price_change_percentage_7d"),
+            "volume_24h": (market.get("total_volume") or {}).get("usd"),
+            "market_cap": (market.get("market_cap") or {}).get("usd"),
+            "liquidity": (market.get("total_value_locked") or {}).get("usd"),
+            "circulating_supply": market.get("circulating_supply"),
+            "total_supply": market.get("total_supply"),
+            "fdv": (market.get("fully_diluted_valuation") or {}).get("usd"),
+            "ath": (market.get("ath") or {}).get("usd"),
+            "atl": (market.get("atl") or {}).get("usd"),
+            "volatility": volatility,
         }
-
-        for symbol, current_price in popular_tokens.items():
-            token_data = fetch_token_data(symbol)
-            liquidity = 0
-            volume_24h = 0
-
-            if token_data and len(token_data) > 0:
-                best_pair = max(token_data, key=lambda x: x.get('liquidity', 0))
-                liquidity = best_pair.get('liquidity', 0)
-                volume_24h = best_pair.get('volume', 0)
-
-            if liquidity == 0:
-                if symbol in ["BTC", "ETH"]:
-                    liquidity = random.uniform(50000000, 200000000)
-                elif symbol in ["USDT", "USDC", "DAI"]:
-                    liquidity = random.uniform(100000000, 500000000)
-                else:
-                    liquidity = random.uniform(1000000, 50000000)
-
-            if volume_24h == 0:
-                if symbol in ["BTC", "ETH"]:
-                    volume_24h = random.uniform(20000000, 100000000)
-                elif symbol in ["USDT", "USDC", "DAI"]:
-                    volume_24h = random.uniform(50000000, 200000000)
-                else:
-                    volume_24h = random.uniform(500000, 20000000)
-
-            if symbol in ["BTC"]:
-                market_cap = current_price * 19700000 
-            elif symbol in ["ETH", "WETH"]:
-                market_cap = current_price * 120000000 
-            elif symbol in ["USDT", "USDC", "DAI"]:
-                market_cap = random.uniform(80000000000, 120000000000) 
-            else:
-                market_cap = random.uniform(1000000000, 50000000000)
-
-            circulating_supply = market_cap / current_price
-            total_supply = circulating_supply * random.uniform(1.0, 1.2)
-            change_24h = random.uniform(-8, 8)
-            change_7d = random.uniform(-20, 20)
-            volatility = random.uniform(5, 50)
-            fdv = total_supply * current_price
-
-            market_data.append({
-                "id": symbol.lower(),
-                "symbol": symbol.upper(),
-                "name": symbol.upper(),
-                "price": round(current_price, 6),
-                "change_24h": round(change_24h, 2),
-                "change_7d": round(change_7d, 2),
-                "volume_24h": round(volume_24h, 2),
-                "market_cap": round(market_cap, 2),
-                "liquidity": round(liquidity, 2),
-                "circulating_supply": round(circulating_supply, 2),
-                "total_supply": round(total_supply, 2),
-                "volatility": round(volatility, 2),
-                "fdv": round(fdv, 2),
-                "ath": round(current_price * random.uniform(1.2, 5), 6),
-                "atl": round(current_price * random.uniform(0.2, 0.8), 6)
-            })
-
-        return {"tokens": market_data}
-
     except Exception as e:
-        print(f"[ERROR] Market data fetch failed: {e}")
-        return {"tokens": []}
+        print(f"[ERROR] CG fetch {cg_id}: {e}")
+        return None
 
-@router.get("/api/token_details/{symbol}")
-def get_token_details(symbol: str):
+def fetch_from_coinbase(symbol: str) -> Optional[Dict[str, Any]]:
     try:
-        usd_prices = fetch_all_usd_prices()
-        
-        if symbol.lower() not in usd_prices:
-            return {"error": "Token not found"}
-            
-        current_price = float(usd_prices[symbol.lower()])
-        token_data = fetch_token_data(symbol)
-        
-        details = {
+        url = f"https://api.coinbase.com/v2/prices/{symbol}-USD/spot"
+        res = requests.get(
+            url,
+            headers={"CB-ACCESS-KEY": os.getenv("COINBASE_API_KEY", "")},
+            timeout=10
+        )
+        if res.status_code != 200:
+            return None
+        data = res.json().get("data", {})
+        return {
+            "id": symbol.lower(),
             "symbol": symbol.upper(),
             "name": symbol.upper(),
-            "price": round(current_price, 6),
-            "pairs": []
+            "price": float(data.get("amount")),
+            "change_24h": None,  
+            "change_7d": None,
+            "volume_24h": None,
+            "market_cap": None,
+            "liquidity": None,
+            "circulating_supply": None,
+            "total_supply": None,
+            "fdv": None,
+            "ath": None,
+            "atl": None,
+            "volatility": None,
         }
-        
-        if token_data:
-            for pair in token_data:
-                details["pairs"].append({
-                    "dex": pair.get("dex", "unknown"),
-                    "chain": pair.get("chain", "unknown"),
-                    "price": pair.get("price", 0),
-                    "liquidity": pair.get("liquidity", 0),
-                    "volume": pair.get("volume", 0)
-                })
-        
-        return details
-        
     except Exception as e:
-        print(f"[ERROR] Token details fetch failed: {e}")
-        return {"error": "Failed to fetch token details"}
+        print(f"[ERROR] Coinbase fetch {symbol}: {e}")
+        return None
+
+def fetch_from_dexscreener(address: str) -> Optional[Dict[str, Any]]:
+    try:
+        url = f"https://api.dexscreener.com/latest/dex/search?q={address}"
+        print(f"🔍 Fetching (search) {address} from {url}...")
+        res = requests.get(url, timeout=15)
+        if res.status_code != 200:
+            return None
+        data = res.json()
+        pairs = data.get("pairs")
+        if not pairs:
+            print(f"[WARN] No pairs found for {address}")
+            return None
+
+        best_pair = max(pairs, key=lambda x: float(x.get("liquidity", {}).get("usd", 0) or 0))
+
+        return {
+            "id": best_pair.get("baseToken", {}).get("address", "").lower(),
+            "symbol": (best_pair.get("baseToken", {}).get("symbol") or "").upper(),
+            "name": best_pair.get("baseToken", {}).get("name"),
+            "price": float(best_pair.get("priceUsd") or 0),
+            "change_24h": float((best_pair.get("priceChange") or {}).get("h24", 0) or 0),
+            "change_7d": float((best_pair.get("priceChange") or {}).get("h7d", 0) or 0),  # ✅ düzeltildi
+            "volume_24h": float((best_pair.get("volume") or {}).get("h24", 0) or 0),
+            "market_cap": None,
+            "liquidity": float((best_pair.get("liquidity") or {}).get("usd", 0) or 0),
+            "circulating_supply": None,
+            "total_supply": None,
+            "fdv": None,
+            "ath": None,
+            "atl": None,
+            "volatility": None,
+        }
+    except Exception as e:
+        print(f"[ERROR] DexScreener fetch {address}: {e}")
+        return None
+
+def get_token_data(symbol: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+    cg_id = meta.get("cg_id")
+    address = meta.get("address")
+
+    data = {}
+    if cg_id:
+        cg_data = fetch_from_coingecko(cg_id) or {}
+        data.update(cg_data)
+
+    if (not data.get("price") or data.get("price") == 0) and symbol:
+        cb_data = fetch_from_coinbase(symbol) or {}
+        data["price"] = cb_data.get("price")
+
+    if address:
+        ds_data = fetch_from_dexscreener(address) or {}
+        for key in ["liquidity", "volume_24h"]:
+            if not data.get(key):
+                data[key] = ds_data.get(key)
+
+    enriched = {
+        "id": data.get("id") or symbol.lower(),
+        "symbol": data.get("symbol") or symbol.upper(),
+        "name": data.get("name") or symbol.upper(),
+        "price": data.get("price") or 0.0,
+        "change_24h": data.get("change_24h") or 0.0,
+        "change_7d": data.get("change_7d") or 0.0,
+        "volume_24h": data.get("volume_24h") or 0.0,
+        "market_cap": data.get("market_cap") or 0.0,
+        "liquidity": data.get("liquidity") or 0.0,
+        "circulating_supply": data.get("circulating_supply") or 0.0,
+        "total_supply": data.get("total_supply") or 0.0,
+        "fdv": data.get("fdv") or 0.0,
+        "ath": data.get("ath") or 0.0,
+        "atl": data.get("atl") or 0.0,
+        "volatility": data.get("volatility") or 0.0,
+    }
+
+    return enriched
+
+@router.get("/market_data")
+def get_market_data() -> Dict[str, List[Dict[str, Any]]]:
+    out = []
+    for sym, meta in TOKENS.items():
+        token_data = get_token_data(sym, meta)
+
+        if not token_data.get("price") or token_data.get("price") == 0:
+            continue
+        if not token_data.get("market_cap") and not token_data.get("volume_24h"):
+            continue
+
+        out.append(token_data)
+
+    return {"tokens": out}
