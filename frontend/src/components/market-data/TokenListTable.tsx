@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { VolatilityBadge } from "./VolatilityBadge";
 import { LiquidityBar } from "./LiquidityBar";
@@ -19,16 +18,18 @@ interface Token {
   id: string;
   symbol: string;
   name: string;
-  price: number;
-  change_24h: number;
-  change_7d: number;
-  volume_24h: number;
-  market_cap: number;
-  liquidity: number;
-  circulating_supply: number;
-  total_supply: number;
-  ath: number;
-  atl: number;
+  price: number | null;
+  change_24h: number | null;
+  change_7d: number | null;
+  volume_24h: number | null;
+  market_cap: number | null;
+  liquidity: number | null;
+  circulating_supply: number | null;
+  total_supply: number | null;
+  ath: number | null;
+  atl: number | null;
+  volatility?: number | null;
+  fdv?: number | null;
 }
 
 export function TokenListTable() {
@@ -39,7 +40,7 @@ export function TokenListTable() {
     fetch("http://localhost:8000/api/market_data")
       .then((res) => res.json())
       .then((data) => {
-        setTokens(data.tokens);
+        setTokens(data.tokens || []);
         setLoading(false);
       })
       .catch((err) => {
@@ -47,13 +48,15 @@ export function TokenListTable() {
         setLoading(false);
       });
   }, []);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<
     "price" | "change_24h" | "volume_24h" | "market_cap"
   >("market_cap");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  const formatNumber = (num: number) => {
+  const formatNumber = (num: number | null | undefined) => {
+    if (num === null || num === undefined || isNaN(num)) return "-";
     if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
     if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
     if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
@@ -61,26 +64,36 @@ export function TokenListTable() {
     return `$${num.toFixed(2)}`;
   };
 
-  const formatSupply = (supply: number | undefined) => {
-    if (!supply || supply === 0) return "0";
+  const formatValue = (
+    val: number | null | undefined,
+    decimals = 2,
+    prefix = ""
+  ) => {
+    if (val === null || val === undefined || isNaN(val)) return "-";
+    return prefix + val.toFixed(decimals);
+  };
+
+  const formatSupply = (supply: number | undefined | null) => {
+    if (!supply || supply === 0) return "-";
     if (supply >= 1e9) return `${(supply / 1e9).toFixed(2)}B`;
     if (supply >= 1e6) return `${(supply / 1e6).toFixed(2)}M`;
     if (supply >= 1e3) return `${(supply / 1e3).toFixed(2)}K`;
     return supply.toFixed(0);
   };
 
-  const filteredTokens = tokens.filter(
+  const filteredTokens = (tokens || []).filter(
     (token) =>
       token.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
       token.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  
 
   const sortedTokens = [...filteredTokens].sort((a, b) => {
-    const aValue = a[sortBy as keyof Token];
-    const bValue = b[sortBy as keyof Token];
+    const aValue = a[sortBy as keyof Token] as number | null;
+    const bValue = b[sortBy as keyof Token] as number | null;
     return sortOrder === "desc"
-      ? (bValue as number) - (aValue as number)
-      : (aValue as number) - (bValue as number);
+      ? (bValue || 0) - (aValue || 0)
+      : (aValue || 0) - (bValue || 0);
   });
 
   if (loading) {
@@ -138,7 +151,7 @@ export function TokenListTable() {
               className="border-primary/20 text-primary hover:bg-primary hover:text-white"
             >
               <Filter className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline text-white">Filter</span>
+              <span className="hidden sm:inline">Filter</span>
             </Button>
           </div>
         </div>
@@ -155,7 +168,7 @@ export function TokenListTable() {
                   onClick={() => handleSort("price")}
                 >
                   <div className="flex items-center space-x-1">
-                    <span className="text-white">Price</span>
+                    <span>Price</span>
                     {sortBy === "price" &&
                       (sortOrder === "desc" ? (
                         <TrendingDown className="h-3 w-3" />
@@ -230,42 +243,53 @@ export function TokenListTable() {
                   </TableCell>
                   <TableCell>
                     <div className="font-medium">
-                      ${token.price.toFixed(token.price < 1 ? 4 : 2)}
+                      {formatValue(
+                        token.price,
+                        token.price && token.price < 1 ? 4 : 2,
+                        "$"
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      ATH: ${token.ath.toFixed(2)}
+                      ATH: {formatValue(token.ath, 2, "$")}
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center space-x-2">
                       <span
                         className={
-                          token.change_24h >= 0
+                          (token.change_24h || 0) >= 0
                             ? "text-green-600 dark:text-green-400"
                             : "text-red-600 dark:text-red-400"
                         }
                       >
-                        {token.change_24h >= 0 ? "+" : ""}
-                        {token.change_24h.toFixed(2)}%
+                        {token.change_24h !== null && token.change_24h !== undefined
+                          ? `${token.change_24h >= 0 ? "+" : ""}${token.change_24h.toFixed(2)}%`
+                          : "-"}
                       </span>
-                      {token.change_24h >= 0 ? (
-                        <TrendingUp className="h-3 w-3 text-green-600" />
-                      ) : (
-                        <TrendingDown className="h-3 w-3 text-red-600" />
-                      )}
+                      {token.change_24h !== null && token.change_24h !== undefined ? (
+                        token.change_24h >= 0 ? (
+                          <TrendingUp className="h-3 w-3 text-green-600" />
+                        ) : (
+                          <TrendingDown className="h-3 w-3 text-red-600" />
+                        )
+                      ) : null}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <span
-                      className={
-                        token.change_7d >= 0
-                          ? "text-green-600 dark:text-green-400"
-                          : "text-red-600 dark:text-red-400"
-                      }
-                    >
-                      {token.change_7d >= 0 ? "+" : ""}
-                      {token.change_7d.toFixed(2)}%
-                    </span>
+                    {token.change_7d !== null && token.change_7d !== undefined ? (
+                      <span
+                        className={
+                          token.change_7d >= 0
+                            ? "text-green-600 dark:text-green-400"
+                            : "text-red-600 dark:text-red-400"
+                        }
+                      >
+                        {token.change_7d >= 0 ? "+" : ""}
+                        {token.change_7d.toFixed(2)}%
+                      </span>
+                    ) : (
+                      "-"
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="font-medium">
@@ -275,12 +299,12 @@ export function TokenListTable() {
                   </TableCell>
                   <TableCell>
                     <LiquidityBar
-                      value={token.liquidity}
+                      value={token.liquidity || 0}
                       maxValue={1000000000}
                     />
                   </TableCell>
                   <TableCell>
-                    <VolatilityBadge volatility={token.volatility} />
+                    <VolatilityBadge volatility={token.volatility || 0} />
                   </TableCell>
                   <TableCell>
                     <div className="font-medium">
@@ -306,7 +330,6 @@ export function TokenListTable() {
           </Table>
         </div>
 
-        {/* Tablet Table */}
         <div className="hidden md:block xl:hidden">
           <Table>
             <TableHeader>
@@ -338,25 +361,35 @@ export function TokenListTable() {
                   </TableCell>
                   <TableCell>
                     <div className="font-medium text-sm">
-                      ${token.price.toFixed(token.price < 1 ? 4 : 2)}
+                      {formatValue(
+                        token.price,
+                        token.price && token.price < 1 ? 4 : 2,
+                        "$"
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center space-x-1">
-                      <span
-                        className={`text-sm ${
-                          token.change_24h >= 0
-                            ? "text-green-600"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {token.change_24h >= 0 ? "+" : ""}
-                        {token.change_24h.toFixed(1)}%
-                      </span>
-                      {token.change_24h >= 0 ? (
-                        <TrendingUp className="h-3 w-3 text-green-600" />
+                      {token.change_24h !== null && token.change_24h !== undefined ? (
+                        <>
+                          <span
+                            className={`text-sm ${
+                              token.change_24h >= 0
+                                ? "text-green-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {token.change_24h >= 0 ? "+" : ""}
+                            {token.change_24h.toFixed(1)}%
+                          </span>
+                          {token.change_24h >= 0 ? (
+                            <TrendingUp className="h-3 w-3 text-green-600" />
+                          ) : (
+                            <TrendingDown className="h-3 w-3 text-red-600" />
+                          )}
+                        </>
                       ) : (
-                        <TrendingDown className="h-3 w-3 text-red-600" />
+                        "-"
                       )}
                     </div>
                   </TableCell>
@@ -376,7 +409,6 @@ export function TokenListTable() {
           </Table>
         </div>
 
-        {/* Mobile Cards */}
         <div className="md:hidden space-y-3">
           {sortedTokens.map((token) => (
             <Card key={token.id} className="p-4">
@@ -394,15 +426,22 @@ export function TokenListTable() {
                 </div>
                 <div className="text-right">
                   <div className="font-medium">
-                    ${token.price.toFixed(token.price < 1 ? 4 : 2)}
+                    {formatValue(
+                      token.price,
+                      token.price && token.price < 1 ? 4 : 2,
+                      "$"
+                    )}
                   </div>
                   <div
                     className={`text-sm ${
-                      token.change_24h >= 0 ? "text-green-600" : "text-red-600"
+                      (token.change_24h || 0) >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
                     }`}
                   >
-                    {token.change_24h >= 0 ? "+" : ""}
-                    {token.change_24h.toFixed(2)}%
+                    {token.change_24h !== null && token.change_24h !== undefined
+                      ? `${token.change_24h >= 0 ? "+" : ""}${token.change_24h.toFixed(2)}%`
+                      : "-"}
                   </div>
                 </div>
               </div>
@@ -428,11 +467,14 @@ export function TokenListTable() {
                   <div className="text-muted-foreground text-xs">7d Change</div>
                   <div
                     className={
-                      token.change_7d >= 0 ? "text-green-600" : "text-red-600"
+                      (token.change_7d || 0) >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
                     }
                   >
-                    {token.change_7d >= 0 ? "+" : ""}
-                    {token.change_7d.toFixed(1)}%
+                    {token.change_7d !== null && token.change_7d !== undefined
+                      ? `${token.change_7d >= 0 ? "+" : ""}${token.change_7d.toFixed(1)}%`
+                      : "-"}
                   </div>
                 </div>
                 <div>
@@ -440,7 +482,9 @@ export function TokenListTable() {
                     Volatility
                   </div>
                   <div className="font-medium">
-                    {token.volatility.toFixed(1)}%
+                    {token.volatility !== null && token.volatility !== undefined
+                      ? `${token.volatility.toFixed(1)}%`
+                      : "-"}
                   </div>
                 </div>
               </div>
