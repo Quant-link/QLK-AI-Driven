@@ -108,7 +108,7 @@ export function DCAStatusCard() {
     let live = true;
     const fetchOnce = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/dca_data`);
+        const res = await fetch(`${API_BASE}/api/api/dca_data`);
         const data = await res.json();
         if (live) {
           const list: DCAStrategy[] = Array.isArray(data?.strategies) ? data.strategies : [];
@@ -132,7 +132,7 @@ export function DCAStatusCard() {
     let live = true;
     const fetchLog = async () => {
       try {
-        const r = await fetch(`${API_BASE}/api/execution_log?limit=50`);
+        const r = await fetch(`${API_BASE}/api/api/execution_log?limit=50`);
         const j = await r.json();
         if (live) setExecLog(Array.isArray(j?.items) ? j.items : []);
       } catch (e) {
@@ -266,7 +266,6 @@ export function DCAStatusCard() {
         })}
       </div>
 
-      {/* Strategy Execution Log */}
       <div className="mt-8">
         <div className="text-lg font-semibold mb-3">DCA Execution Log</div>
 
