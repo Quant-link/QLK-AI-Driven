@@ -7,10 +7,11 @@ from app.strategies.arbitrage_and_twap import (
     fetch_all_usd_prices,
     router as arbitrage_router,
 )
-from app.strategies.risk import set_stop_loss, calculate_position_size, router as risk_router
-from app.strategies.dca import router as dca_router
+from app.strategies.risk import set_stop_loss, calculate_position_size 
+from app.strategies.dca import router as dca_router, start_dca_all
 from app.strategies.market_data import router as market_data_router
 from app.routing.route_finder import router as routes_router
+from app.scripts.risk_overview import router as risk_management_router  
 
 import logging
 from decimal import Decimal, DivisionByZero
@@ -19,7 +20,6 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 
-# ---- Middleware ----
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,14 +28,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---- Routers ----
-app.include_router(arbitrage_router)
-app.include_router(dca_router)
-app.include_router(risk_router)
-app.include_router(market_data_router)
-app.include_router(routes_router)
+app.include_router(arbitrage_router, prefix="/api")
+app.include_router(dca_router, prefix="/api")
+app.include_router(market_data_router, prefix="/api")
+app.include_router(routes_router, prefix="/api")
+app.include_router(risk_management_router, prefix="/api")
 
-# ---- Custom Arbitrage Endpoint ----
 @app.get("/api/arbitrage")
 def get_arbitrage():
     token_data = {}
@@ -48,8 +46,21 @@ def get_arbitrage():
     result = detect_arbitrage(token_data, gas_costs)
     return result
 
+@app.on_event("startup")
+def auto_start_dca():
+    try:
+        start_dca_all(
+            from_symbol="USDT",
+            to_symbol="qlk",
+            total_usd_5=500,
+            total_usd_10=500,
+            total_usd_15=500,
+            delay_seconds=60,
+        )
+        print("[AUTO] ✅ DCA plans started automatically on startup")
+    except Exception as e:
+        print("[AUTO] ❌ Failed to start DCA:", e, flush=True)
 
-# ---- CLI Main ----
 def main():
     print("\n📊 Risk Overview\n")
     total_usd = Decimal("10000")
