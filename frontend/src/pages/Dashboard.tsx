@@ -7,14 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  mockTokens,
   mockArbitrageOpportunities,
-  mockStrategies,
   mockMarketMetrics,
   mockPerformanceData,
 } from "@/lib/mock-data";
 import {
-  BarChart3,
   TrendingUp,
   Zap,
   Target,
@@ -24,6 +21,16 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+
+const toNum = (v: unknown): number | null => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const fmt = (v: unknown, digits = 2): string => {
+  const n = toNum(v);
+  return n === null ? "—" : n.toFixed(digits);
+};
 
 interface DCAStrategy {
   id: number;
@@ -47,10 +54,10 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/dca_data")
+    fetch("http://localhost:8000/api/api/dca_data")
       .then((res) => res.json())
       .then((data) => {
-        setStrategies(data.strategies);
+        setStrategies(data?.strategies || []);
         setLoading(false);
       })
       .catch((err) => {
@@ -59,8 +66,7 @@ export function Dashboard() {
       });
   }, []);
 
-  // Calculate active strategies from real DCA data
-  const activeStrategies = strategies.filter(
+  const activeStrategies = strategies?.filter(
     (s) => s.status === "active"
   ).length;
 
@@ -79,7 +85,7 @@ export function Dashboard() {
         className="border-primary/20 text-primary hover:bg-primary hover:text-white"
       >
         <RefreshCw className="h-4 w-4 sm:mr-2" />
-        <span className="hidden sm:inline text-white">Refresh</span>
+        <span className="hidden sm:inline">Refresh</span>
       </Button>
       <Button
         size="sm"
@@ -97,11 +103,10 @@ export function Dashboard() {
       description="Real-time overview of AI trading strategies, market opportunities, and performance metrics"
       actions={actions}
     >
-      {/* Key Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
         <MetricCard
           title="Total Value Locked"
-          value={`$${(mockMarketMetrics.totalValueLocked / 1e9).toFixed(2)}B`}
+          value={`$${fmt(mockMarketMetrics.totalValueLocked / 1e9, 2)}B`}
           change={5.2}
           icon={DollarSign}
           description="Assets under management"
@@ -113,7 +118,11 @@ export function Dashboard() {
           change={0}
           icon={Target}
           description="Currently running strategies"
-          progress={loading ? 0 : (activeStrategies / strategies.length) * 100}
+          progress={
+            loading || strategies.length === 0
+              ? 0
+              : (activeStrategies / strategies.length) * 100
+          }
           target={loading ? 0 : strategies.length}
         />
         <MetricCard
@@ -134,7 +143,6 @@ export function Dashboard() {
         />
       </div>
 
-      {/* Performance Overview */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
         <Card className="xl:col-span-2">
           <CardHeader>
@@ -149,7 +157,7 @@ export function Dashboard() {
                 </p>
               </div>
               <Badge variant="secondary" className="text-green-600">
-                +{mockMarketMetrics.totalPnL.toFixed(2)} USD
+                +{fmt(mockMarketMetrics.totalPnL, 2)} USD
               </Badge>
             </div>
           </CardHeader>
@@ -234,7 +242,7 @@ export function Dashboard() {
         </Card>
 
         <div className="space-y-4 sm:space-y-6">
-          <VolatilityAlert tokens={mockTokens} />
+          <VolatilityAlert />
 
           <Card>
             <CardHeader className="pb-3">
@@ -263,29 +271,27 @@ export function Dashboard() {
                   variant="outline"
                   className="text-green-600 border-green-200"
                 >
-                  ${totalProfit.toFixed(2)}
+                  ${fmt(totalProfit, 2)}
                 </Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs sm:text-sm text-muted-foreground">
                   Monitored Tokens
                 </span>
-                <Badge variant="outline">{mockTokens.length}</Badge>
+                <Badge variant="outline">Dynamic</Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs sm:text-sm text-muted-foreground">
                   24h Volume
                 </span>
                 <Badge variant="outline">
-                  ${(mockMarketMetrics.totalVolume24h / 1e9).toFixed(1)}B
+                  ${fmt(mockMarketMetrics.totalVolume24h / 1e9, 1)}B
                 </Badge>
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
-
-      {/* Recent Opportunities and Risk Management */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <RecentOpportunitiesTable />
         <RiskManagementTable />
