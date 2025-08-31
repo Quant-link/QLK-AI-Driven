@@ -8,6 +8,22 @@ import { formatDistanceToNow } from "date-fns";
 import { TrendingUp, Clock, Zap, CheckCircle, XCircle, Timer } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+const toNum = (v: unknown): number | null => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const fmt = (v: unknown, digits = 2): string => {
+  const n = toNum(v);
+  return n === null ? "—" : n.toFixed(digits);
+};
+
+const fmtPct = (v: unknown, digits = 2): string => {
+  const n = toNum(v);
+  return n === null ? "—" : `${n.toFixed(digits)}%`;
+};
+
+
 function getStatusConfig(status: string) {
   switch (status) {
     case "executed":
@@ -86,7 +102,7 @@ export function RecentOpportunitiesTable() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/arbitrage")
+    fetch("http://localhost:8000/api/api/arbitrage")
       .then((res) => res.json())
       .then((data) => {
         if (!data || !Array.isArray(data.opportunities)) {
@@ -118,9 +134,9 @@ export function RecentOpportunitiesTable() {
   }, []);
 
   const formatVolume = (volume: number) => {
-    if (volume >= 1_000_000) return `$${(volume / 1_000_000).toFixed(1)}M`;
-    if (volume >= 1_000) return `$${(volume / 1_000).toFixed(1)}K`;
-    return `$${volume.toFixed(0)}`;
+    if (volume >= 1_000_000) return `$${fmt(volume / 1_000_000, 1)}M`;
+    if (volume >= 1_000) return `$${fmt(volume / 1_000, 1)}K`;
+    return `$${fmt(volume, 0)}`;
   };
 
   const rows = useMemo(() => opportunities, [opportunities]);
@@ -168,7 +184,7 @@ export function RecentOpportunitiesTable() {
                         {o.tokenA}/{o.tokenB}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        {o.profitPercentage.toFixed(2)}% spread
+                        {fmtPct(o.profitPercentage, 2)} spread
                       </div>
                     </TableCell>
                     <TableCell>
@@ -189,7 +205,7 @@ export function RecentOpportunitiesTable() {
                         {formatQLK(o.profitQLK, o.profitUSD)}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {o.profitPercentage.toFixed(2)}%
+                        {fmtPct(o.profitPercentage, 2)}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -257,7 +273,7 @@ export function RecentOpportunitiesTable() {
                       {formatQLK(o.profitQLK, o.profitUSD)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {o.profitPercentage.toFixed(2)}%
+                      {fmtPct(o.profitPercentage, 2)}
                     </div>
                   </div>
                   <div>
@@ -313,7 +329,7 @@ export function RecentOpportunitiesTable() {
                         {o.tokenA}/{o.tokenB}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {o.profitPercentage.toFixed(2)}%
+                        {fmtPct(o.profitPercentage, 2)}
                       </div>
                     </TableCell>
                     <TableCell>
