@@ -1,8 +1,9 @@
 import json, os
 from typing import Dict, Any, List
-from app.routing.dex_clients.coingecko import fetch_top_100_tokens
 from dotenv import load_dotenv
+
 load_dotenv()
+
 TOKENS_JSON_PATH = os.getenv("TOKENS_JSON_PATH", "app/config/tokens.json")
 
 def load_tokens_file() -> Dict[str, Any]:
@@ -23,16 +24,17 @@ def load_tokens_file() -> Dict[str, Any]:
                 "symbol": sym,
                 "chain": t.get("chain", "ethereum"),
                 "address": t.get("address"),
-                "decimals": int(t.get("decimals", 18))
+                "decimals": int(t.get("decimals", 18)),
+                "cg_id": t.get("cg_id")  
             }
     elif isinstance(data, dict):
-        # already in map form
         for sym, t in data.items():
             out[sym.upper()] = {
                 "symbol": sym.upper(),
                 "chain": t.get("chain", "ethereum"),
                 "address": t.get("address"),
-                "decimals": int(t.get("decimals", 18))
+                "decimals": int(t.get("decimals", 18)),
+                "cg_id": t.get("cg_id")
             }
     return out
 
@@ -41,10 +43,7 @@ def save_tokens_file(tokens_list: List[Dict[str, Any]]) -> None:
         json.dump(tokens_list, f, ensure_ascii=False, indent=2)
 
 def refresh_tokens() -> Dict[str, Any]:
-    top = fetch_top_100_tokens()
-    top_sorted = sorted(top, key=lambda x: x["symbol"])
-    save_tokens_file(top_sorted)
-    return { t["symbol"].upper(): t for t in top_sorted }
+    return load_tokens_file()
 
 TOKENS: Dict[str, Any] = load_tokens_file()
 
