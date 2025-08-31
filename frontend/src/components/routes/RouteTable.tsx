@@ -13,7 +13,6 @@ import { GasCostIndicator } from "./GasCostIndicator";
 import { SlippageWarning } from "./SlippageWarning";
 import { useEffect, useState } from "react";
 
-/* ---------------------- DEX label mapping ---------------------- */
 const DEX_LABEL: Record<string, string> = {
   uniswap: "Uniswap",
   uniswap_v2: "Uniswap V2",
@@ -27,7 +26,6 @@ const DEX_LABEL: Record<string, string> = {
   pulsex: "PulseX",
   pumpswap: "PumpSwap",
   swappi: "Swappi",
-  // aggregators (fallback)
   "1inch": "1inch",
   openocean: "OpenOcean",
 };
@@ -86,7 +84,6 @@ function normalizeDex(raw: string | null | undefined): string {
   return s;
 }
 
-/* --------------------------- types ---------------------------- */
 interface Route {
   id: number;
   from_token: string;
@@ -115,7 +112,7 @@ export function RouteTable() {
 
   const fetchRoutes = (amt: number) => {
     setLoading(true);
-    fetch(`http://localhost:8000/api/routes?amount=${amt}`)
+    fetch(`http://localhost:8000/api/api/routes?amount=${amt}`)
       .then((res) => res.json())
       .then((data) => {
         setRoutes(Array.isArray(data?.routes) ? data.routes : []);
@@ -126,7 +123,7 @@ export function RouteTable() {
         setLoading(false);
       });
   };
-
+  
   if (loading) {
     return (
       <Card>
@@ -215,34 +212,28 @@ export function RouteTable() {
 
               return (
                 <TableRow key={route.id}>
-                  {/* Pair */}
                   <TableCell className="font-medium">
                     {route.from_token} → {route.to_token}
                   </TableCell>
 
-                  {/* Best DEX (normalized with source fallback) */}
                   <TableCell>
                     <Badge variant="outline" className="text-xs">
                       {prettyDex}
                     </Badge>
                   </TableCell>
 
-                  {/* Amount */}
                   <TableCell>
                     <div className="font-medium">{amountStr}</div>
                   </TableCell>
 
-                  {/* Expected Output */}
                   <TableCell>
                     <div className="font-medium">{expected}</div>
                   </TableCell>
 
-                  {/* Gas Cost */}
                   <TableCell>
                     <GasCostIndicator cost={isFinite(gasUsd) ? gasUsd : 0} />
                   </TableCell>
 
-                  {/* Slippage */}
                   <TableCell>
                     <div className="flex items-center space-x-2">
                       <span>{slip}</span>
@@ -252,7 +243,6 @@ export function RouteTable() {
                     </div>
                   </TableCell>
 
-                  {/* Efficiency */}
                   <TableCell>
                     <Badge
                       variant={
@@ -267,7 +257,6 @@ export function RouteTable() {
                     </Badge>
                   </TableCell>
 
-                  {/* Est. Time */}
                   <TableCell className="text-muted-foreground">{exec}</TableCell>
                 </TableRow>
               );
