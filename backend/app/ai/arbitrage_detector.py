@@ -2,6 +2,7 @@ import os
 import time
 import requests
 from datetime import datetime
+from typing import Union
 from app.aggregator.price_feed import calculate_slippage
 from app.config.constants import QLK_SUPPORTED_DEX, DEX_CHAINS
 from app.config.constants import GAS_COSTS_USD, BRIDGE_COSTS_USD
@@ -35,7 +36,7 @@ DEX_LABELS = {
     "swappi": "Swappi",
 }
 
-def get_usd_per_qlk() -> float | None:
+def get_usd_per_qlk() -> Union[float, None]:
     now = time.time()
     if _CG_CACHE["usd_per_qlk"] and now - _CG_CACHE["ts"] < _CG_TTL:
         return _CG_CACHE["usd_per_qlk"]

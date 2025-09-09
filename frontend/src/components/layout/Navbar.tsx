@@ -3,11 +3,11 @@ import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { 
-  BarChart3, 
-  TrendingUp, 
-  Route, 
-  Settings, 
+import {
+  BarChart3,
+  TrendingUp,
+  Route,
+  Settings,
   Activity,
   Zap,
   Bell,
@@ -15,6 +15,7 @@ import {
   Menu,
   X
 } from 'lucide-react';
+import logoSvg from '@/assets/logo.svg';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -143,15 +144,12 @@ export function Navbar(): JSX.Element {
         <div className="flex justify-between items-center h-14 sm:h-16">
           {/* Logo Section */}
           <div className="flex items-center">
-            <div className="flex-shrink-0 flex items-center space-x-2 sm:space-x-3">
-              <div className="h-7 w-7 sm:h-8 sm:w-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <Activity className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
-              </div>
-              <div className="hidden sm:block">
-                <h1 className="text-lg sm:text-xl font-bold text-foreground">TradingAI</h1>
-                <p className="text-xs text-muted-foreground hidden lg:block">Professional Trading Suite</p>
-              </div>
-              <h1 className="text-lg font-bold text-foreground sm:hidden">AI</h1>
+            <div className="flex-shrink-0 flex items-center">
+              <img
+                src={logoSvg}
+                alt="QuantLink Logo"
+                className="h-8 sm:h-10 w-auto"
+              />
             </div>
             
             {/* Desktop Navigation */}

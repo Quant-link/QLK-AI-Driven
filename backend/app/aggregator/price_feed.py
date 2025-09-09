@@ -3,6 +3,7 @@ import random
 import math
 import time
 import os
+from typing import Union
 from app.config.tokens import TOKENS
 
 
@@ -131,7 +132,7 @@ def fetch_token_data_extended(symbol: str):
 _CG_CACHE = {"ts": 0, "usd_per_qlk": None}
 _CG_TTL = 60  # saniye
 
-def get_usd_per_qlk() -> float | None:
+def get_usd_per_qlk() -> Union[float, None]:
     now = time.time()
     if _CG_CACHE["usd_per_qlk"] and now - _CG_CACHE["ts"] < _CG_TTL:
         return _CG_CACHE["usd_per_qlk"]

@@ -4,6 +4,7 @@ import random
 import math
 from decimal import Decimal
 import requests
+from typing import Union, Tuple
 from fastapi import APIRouter
 from app.config.tokens import TOKENS
 from app.aggregator.price_feed import fetch_gas_costs, fetch_token_data_extended
@@ -88,7 +89,7 @@ def fetch_all_usd_prices() -> dict:
 
 def fetch_price_from_1inch(from_symbol: str,
                            to_symbol: str,
-                           amount: Decimal) -> Decimal | None:
+                           amount: Decimal) -> Union[Decimal, None]:
     try:
         print(f"📡 1inch API request for {from_symbol}→{to_symbol} started...")
 
@@ -132,7 +133,7 @@ def fetch_price_from_openocean(from_symbol: str,
                                to_symbol: str,
                                amount: Decimal,
                                usd_prices: dict[str, Decimal],
-                               reference_price: Decimal = None) -> Decimal | None:
+                               reference_price: Decimal = None) -> Union[Decimal, None]:
     try:
         print(f"📡 OpenOcean API request for {from_symbol}→{to_symbol} started...")
 
@@ -260,7 +261,7 @@ def fetch_price_from_openocean(from_symbol: str,
 def best_direct_quote(from_symbol: str,
                       to_symbol: str,
                       amount: Decimal,
-                      usd_prices: dict[str, Decimal]) -> Decimal | None:
+                      usd_prices: dict[str, Decimal]) -> Union[Decimal, None]:
     oo = fetch_price_from_openocean(from_symbol, to_symbol, amount, usd_prices)
     if oo is not None and oo > 0:
         return oo
@@ -273,7 +274,7 @@ def best_direct_quote(from_symbol: str,
 def best_single_quote(from_symbol: str,
                       to_symbol: str,
                       amount: Decimal,
-                      usd_prices: dict[str, Decimal]) -> Decimal | None:
+                      usd_prices: dict[str, Decimal]) -> Union[Decimal, None]:
 
     direct = best_direct_quote(from_symbol, to_symbol, amount, usd_prices)
     if direct is not None and direct > 0:
@@ -296,7 +297,7 @@ def check_arbitrage_opportunity(from_symbol: str,
                                  amount: Decimal,
                                  usd_prices: dict[str, Decimal],
                                  min_profit_pct: Decimal = Decimal("0.01"),
-                                 allow_single_source: bool = False,) -> tuple[str, str, Decimal, Decimal] | tuple[None, None, None, None]:
+                                 allow_single_source: bool = False,) -> Union[Tuple[str, str, Decimal, Decimal], Tuple[None, None, None, None]]:
 
     price_1inch = fetch_price_from_1inch(from_symbol, to_symbol, amount)
     print(f"[DEBUG] 1inch price for {from_symbol}→{to_symbol}: {price_1inch}")
@@ -382,7 +383,7 @@ def execute_twap(from_symbol: str,
                  total_usd: Decimal,
                  usd_prices: dict[str, Decimal],
                  steps: int = 10,
-                 delay: int = 2) -> Decimal | None:
+                 delay: int = 2) -> Union[Decimal, None]:
     logging.info(f"🚀 Starting TWAP for {from_symbol} → {to_symbol}")
 
     token_usd_price = _usd_price_for(from_symbol, usd_prices)

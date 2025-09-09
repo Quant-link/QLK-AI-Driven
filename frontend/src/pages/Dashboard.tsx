@@ -82,7 +82,7 @@ export function Dashboard() {
       <Button
         variant="outline"
         size="sm"
-        className="border-primary/20 text-primary hover:bg-primary hover:text-white"
+        className="border-primary/20 text-white hover:bg-primary hover:text-white"
       >
         <RefreshCw className="h-4 w-4 sm:mr-2" />
         <span className="hidden sm:inline">Refresh</span>

@@ -47,7 +47,7 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #4dace1 0%, #3a8bc7 100%);
   color: white;
   cursor: pointer;
   transition: all 0.2s ease-in-out;
@@ -56,13 +56,13 @@ button {
   touch-action: manipulation;
 }
 button:hover {
-  background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+  background: linear-gradient(135deg, #3a8bc7 0%, #2e7bb3 100%);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 12px rgba(77, 172, 225, 0.4);
 }
 button:active {
   transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 6px rgba(77, 172, 225, 0.3);
 }
 button:disabled {
   opacity: 0.6;
@@ -72,7 +72,7 @@ button:disabled {
 }
 button:focus,
 button:focus-visible {
-  outline: 2px solid #667eea;
+  outline: 2px solid #4dace1;
   outline-offset: 2px;
 }
 
@@ -85,11 +85,11 @@ button:focus-visible {
     color: #747bff;
   }
   button {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #4dace1 0%, #3a8bc7 100%);
     color: white;
   }
   button:hover {
-    background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+    background: linear-gradient(135deg, #3a8bc7 0%, #2e7bb3 100%);
   }
 }
 
@@ -101,7 +101,7 @@ button:focus-visible {
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
+    --primary: 200 70% 59%;
     --primary-foreground: 0 0% 98%;
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
@@ -128,7 +128,7 @@ button:focus-visible {
     --card-foreground: 0 0% 98%;
     --popover: 0 0% 3.9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
+    --primary: 200 70% 59%;
     --primary-foreground: 0 0% 9%;
     --secondary: 0 0% 14.9%;
     --secondary-foreground: 0 0% 98%;
