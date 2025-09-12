@@ -5,8 +5,9 @@ from decimal import Decimal
 from typing import List, Dict, Tuple, Optional, Any
 from fastapi import APIRouter, HTTPException, Query
 from datetime import datetime, timezone
-
+from app.routing.dex_clients.uniswap import UniswapClient
 from app.routing.dex_clients.base import DexClient
+from app.routing.dex_clients.dexscreener import DexScreenerClient
 from app.routing.dex_clients.zerox import ZeroXClient
 from app.routing.dex_clients.oneinch import OneInchClient
 from app.routing.dex_clients.openocean import OpenOceanClient
@@ -349,7 +350,7 @@ def _run_plan_in_background(
     try:
         usd_prices_raw = fetch_all_usd_prices()
         usd_prices = {k.lower(): Decimal(str(v)) for k, v in usd_prices_raw.items()}
-        dex_clients: List[DexClient] = [ZeroXClient(), OneInchClient(), OpenOceanClient()]
+        dex_clients: List[DexClient] = [DexScreenerClient()]
         strategy = DCAStrategy(
             dex_clients=dex_clients,
             usd_prices=usd_prices,
