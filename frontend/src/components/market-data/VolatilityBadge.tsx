@@ -1,6 +1,5 @@
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { TrendingUp, Minus } from 'lucide-react';
 
 interface VolatilityBadgeProps {
   volatility: number;
@@ -41,12 +40,12 @@ export function VolatilityBadge({ volatility }: VolatilityBadgeProps) {
       <div className="space-y-1">
         <div className="flex justify-between text-xs">
           <span className="text-muted-foreground">Volatility</span>
-          <span className="font-medium">{volatility.toFixed(1)}%</span>
+          <span className="font-medium">{(volatility * 100).toFixed(2)}%</span>
         </div>
         <div className="w-full bg-muted rounded-full h-1.5">
           <div 
             className={`h-1.5 rounded-full transition-all duration-300 ${progressColor}`}
-            style={{ width: `${Math.min(volatility * 2, 100)}%` }}
+            style={{ width: `${Math.min(volatility, 100)}%` }}
           />
         </div>
       </div>
