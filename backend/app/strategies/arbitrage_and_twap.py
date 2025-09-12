@@ -4,6 +4,7 @@ import random
 import math
 from decimal import Decimal
 import requests
+from typing import Union, Tuple
 from fastapi import APIRouter
 from app.config.tokens import TOKENS
 from app.aggregator.price_feed import fetch_gas_costs, fetch_token_data_extended
@@ -88,7 +89,7 @@ def fetch_all_usd_prices() -> dict:
 
 def fetch_price_from_1inch(from_symbol: str,
                            to_symbol: str,
-                           amount: Decimal) -> Decimal | None:
+                           amount: Decimal) -> Union[Decimal, None]:
     try:
         print(f"📡 1inch API request for {from_symbol}→{to_symbol} started...")
 
@@ -102,7 +103,7 @@ def fetch_price_from_1inch(from_symbol: str,
 
         resp = requests.get(
             "https://api.1inch.dev/swap/v5.2/1/quote",
-            headers={"Authorization": "Bearer eMtNjDGH8VKvNqWfkmcKrYs15Ih7pU8r"},  # mevcut key'in
+            headers={"Authorization": "Bearer eMtNjDGH8VKvNqWfkmcKrYs15Ih7pU8r"},
             params={
                 "src": src["address"],
                 "dst": dst["address"],
@@ -127,12 +128,11 @@ def fetch_price_from_1inch(from_symbol: str,
         logging.warning(f"1inch price fetch failed: {e}")
         return None
 
-
 def fetch_price_from_openocean(from_symbol: str,
                                to_symbol: str,
                                amount: Decimal,
                                usd_prices: dict[str, Decimal],
-                               reference_price: Decimal = None) -> Decimal | None:
+                               reference_price: Decimal = None) -> Union[Decimal, None]:
     try:
         print(f"📡 OpenOcean API request for {from_symbol}→{to_symbol} started...")
 
@@ -260,7 +260,7 @@ def fetch_price_from_openocean(from_symbol: str,
 def best_direct_quote(from_symbol: str,
                       to_symbol: str,
                       amount: Decimal,
-                      usd_prices: dict[str, Decimal]) -> Decimal | None:
+                      usd_prices: dict[str, Decimal]) -> Union[Decimal, None]:
     oo = fetch_price_from_openocean(from_symbol, to_symbol, amount, usd_prices)
     if oo is not None and oo > 0:
         return oo
@@ -269,11 +269,10 @@ def best_direct_quote(from_symbol: str,
         return o1
     return None
 
-
 def best_single_quote(from_symbol: str,
                       to_symbol: str,
                       amount: Decimal,
-                      usd_prices: dict[str, Decimal]) -> Decimal | None:
+                      usd_prices: dict[str, Decimal]) -> Union[Decimal, None]:
 
     direct = best_direct_quote(from_symbol, to_symbol, amount, usd_prices)
     if direct is not None and direct > 0:
@@ -291,63 +290,57 @@ def best_single_quote(from_symbol: str,
             best = a2
     return best
 
-def check_arbitrage_opportunity(from_symbol: str,
-                                 to_symbol: str,
-                                 amount: Decimal,
-                                 usd_prices: dict[str, Decimal],
-                                 min_profit_pct: Decimal = Decimal("0.01"),
-                                 allow_single_source: bool = False,) -> tuple[str, str, Decimal, Decimal] | tuple[None, None, None, None]:
+def check_arbitrage_opportunity(
+    from_symbol: str,
+    to_symbol: str,
+    amount: Decimal,
+    usd_prices: dict[str, Decimal],
+    min_profit_pct: Decimal = Decimal("0.01"),
+    allow_single_source: bool = False,
+) -> Union[Tuple[str, str, Decimal, Decimal], Tuple[None, None, None, None]]:
 
     price_1inch = fetch_price_from_1inch(from_symbol, to_symbol, amount)
     print(f"[DEBUG] 1inch price for {from_symbol}→{to_symbol}: {price_1inch}")
 
-    price_openocean = fetch_price_from_openocean(from_symbol, to_symbol, amount, usd_prices, reference_price=price_1inch)
+    price_openocean = fetch_price_from_openocean(
+        from_symbol, to_symbol, amount, usd_prices, reference_price=price_1inch
+    )
     print(f"[DEBUG] OpenOcean price for {from_symbol}→{to_symbol}: {price_openocean}")
 
     if price_1inch is None or price_openocean is None:
         if not allow_single_source:
             return None, None, None, None
         if price_1inch is not None:
-            buy_from = "1inch"
-            sell_to = "1inch"
-            buy_price = price_1inch
-            sell_price = price_1inch
+            return "1inch", "1inch", Decimal("0"), Decimal("0")
         elif price_openocean is not None:
-            buy_from = "OpenOcean"
-            sell_to = "OpenOcean"
-            buy_price = price_openocean
-            sell_price = price_openocean
+            return "OpenOcean", "OpenOcean", Decimal("0"), Decimal("0")
         else:
             return None, None, None, None
 
-        profit = Decimal("0")
-        profit_pct = Decimal("0")
-        net_profit_usd = Decimal("0")
-        return buy_from, sell_to, profit_pct, net_profit_usd
-
-
     estimated_gas_usd = Decimal("15.0")
 
-    if price_1inch < price_openocean:
-        buy_from = "1inch"
-        sell_to = "OpenOcean"
-        buy_price = price_1inch
-        sell_price = price_openocean
-    elif price_openocean < price_1inch:
-        buy_from = "OpenOcean"
-        sell_to = "1inch"
-        buy_price = price_openocean
-        sell_price = price_1inch
+    unit_price_1inch = amount / price_1inch
+    unit_price_openocean = amount / price_openocean
+
+    if unit_price_1inch < unit_price_openocean:
+        buy_from, sell_to = "1inch", "OpenOcean"
+        buy_price, sell_price = unit_price_1inch, unit_price_openocean
     else:
-        return None, None, None, None
+        buy_from, sell_to = "OpenOcean", "1inch"
+        buy_price, sell_price = unit_price_openocean, unit_price_1inch
 
     profit = sell_price - buy_price
     profit_pct = (profit / buy_price) * Decimal("100")
+
     usd_price_to = _usd_price_for(to_symbol, usd_prices)
     net_profit_usd = (profit * usd_price_to) - estimated_gas_usd
-    print(f"[DEBUG] Raw profit: {profit} {to_symbol.upper()} | Net USD profit: {net_profit_usd} | Profit %: {profit_pct}")
 
-    if profit_pct >= min_profit_pct and net_profit_usd > 0:
+    print(
+        f"[DEBUG] Raw profit: {profit} {to_symbol.upper()} | "
+        f"Net USD profit: {net_profit_usd} | Profit %: {profit_pct}"
+    )
+
+    if sell_price > buy_price and profit_pct >= min_profit_pct and net_profit_usd > 0:
         return buy_from, sell_to, profit_pct, net_profit_usd
 
     return None, None, None, None
@@ -382,7 +375,7 @@ def execute_twap(from_symbol: str,
                  total_usd: Decimal,
                  usd_prices: dict[str, Decimal],
                  steps: int = 10,
-                 delay: int = 2) -> Decimal | None:
+                 delay: int = 2) -> Union[Decimal, None]:
     logging.info(f"🚀 Starting TWAP for {from_symbol} → {to_symbol}")
 
     token_usd_price = _usd_price_for(from_symbol, usd_prices)
@@ -448,9 +441,6 @@ def main():
             logging.warning(f"⚠️ Skipping TWAP for {from_symbol}: no valid USD price")
             continue
         execute_twap(from_symbol, to_symbol, total_usd, usd_prices)
-
-
-# --------------------- Resolver yardımcıları ---------------------
 
 def _norm(sym: str) -> str:
     return (sym or "").strip().upper()
