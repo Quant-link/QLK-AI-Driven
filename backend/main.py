@@ -11,7 +11,7 @@ from app.strategies.risk import set_stop_loss, calculate_position_size
 from app.strategies.dca import router as dca_router, start_dca_all
 from app.strategies.market_data import router as market_data_router
 from app.routing.route_finder import router as routes_router
-from app.scripts.risk_overview import router as risk_management_router  
+from app.strategies.risk import router as risk_management_router
 
 import logging
 from decimal import Decimal, DivisionByZero
