@@ -26,10 +26,9 @@ interface Token {
   liquidity: number | null;
   circulating_supply: number | null;
   total_supply: number | null;
-  ath: number | null;
   atl: number | null;
   volatility?: number | null;
-  fdv?: number | null;
+
 }
 
 export function TokenListTable() {
@@ -56,13 +55,14 @@ export function TokenListTable() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const formatNumber = (num: number | null | undefined) => {
-    if (num === null || num === undefined || isNaN(num)) return "-";
+    if (num === null || num === undefined || isNaN(num) || num === 0) return "-";
     if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
     if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
     if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
     if (num >= 1e3) return `$${(num / 1e3).toFixed(2)}K`;
     return `$${num.toFixed(2)}`;
   };
+  
 
   const formatValue = (
     val: number | null | undefined,
@@ -148,7 +148,7 @@ export function TokenListTable() {
             <Button
               variant="outline"
               size="sm"
-              className="border-primary/20 text-primary hover:bg-primary hover:text-white"
+              className="border-primary/20 text-white hover:bg-primary hover:text-white"
             >
               <Filter className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">Filter</span>
@@ -157,7 +157,6 @@ export function TokenListTable() {
         </div>
       </CardHeader>
       <CardContent>
-        {/* Desktop Table */}
         <div className="hidden xl:block">
           <Table>
             <TableHeader>
@@ -249,9 +248,6 @@ export function TokenListTable() {
                         "$"
                       )}
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      ATH: {formatValue(token.ath, 2, "$")}
-                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center space-x-2">
@@ -304,14 +300,11 @@ export function TokenListTable() {
                     />
                   </TableCell>
                   <TableCell>
-                    <VolatilityBadge volatility={token.volatility || 0} />
+                    <VolatilityBadge volatility={token.volatility !== null && token.volatility !== undefined ? token.volatility : 0} />
                   </TableCell>
                   <TableCell>
                     <div className="font-medium">
                       {formatNumber(token.market_cap)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      FDV: {formatNumber(token.fdv)}
                     </div>
                   </TableCell>
                   <TableCell>
