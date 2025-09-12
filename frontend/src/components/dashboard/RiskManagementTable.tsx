@@ -188,7 +188,7 @@ export function RiskManagementTable() {
                   <TableCell>
                     <div className="font-medium">{fmt(token.position_size, 2)}</div>
                     <div className="text-sm text-muted-foreground">
-                      Max DD: {fmtPct((token.max_drawdown ?? 0) * 100, 1)}
+                      Max DD: {fmtPct(token.max_drawdown, 1)}
                     </div>
                   </TableCell>
 
