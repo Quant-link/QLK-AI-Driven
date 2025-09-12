@@ -1,8 +1,12 @@
 import requests
 import time
 import logging
+from decimal import Decimal
+from typing import Tuple, Optional
 
-# Zincir eşlemesi: internal → dexscreener
+from app.routing.dex_clients.base import DexClient
+from app.config.tokens import TOKENS
+
 chain_mapping = {
     "ethereum": "ethereum",
     "bsc": "bsc",
@@ -12,58 +16,52 @@ chain_mapping = {
     "avalanche": "avalanche",
     "solana": "solana",
     "aptos": "aptos"
-    # unsupported chains like osmosis, pulsechain, thala should be skipped
 }
 
+DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
 
-def get_token_info(query: str):
-    try:
-        base_url = "https://api.dexscreener.com/latest/dex/search"
-        response = requests.get(base_url, params={"q": query})
-        response.raise_for_status()
-        data = response.json()
+class DexScreenerClient(DexClient):
+    name = "DexScreener"
 
-        if data.get("pairs"):
-            best_pair = data["pairs"][0]
-            return {
-                "chain": best_pair["chainId"],
-                "address": best_pair["pairAddress"]
-            }
+    def __init__(self, chain: str = "ethereum"):
+        self.chain = chain
 
-        symbol_query = query.upper()
-        response = requests.get(base_url, params={"q": symbol_query})
-        response.raise_for_status()
-        data = response.json()
+    def _resolve(self, symbol: str) -> Optional[str]:
+        sym = symbol.upper()
+        info = TOKENS.get(sym)
+        if not info:
+            return None
+        return info["address"]
 
-        if data.get("pairs"):
-            best_pair = data["pairs"][0]
-            return {
-                "chain": best_pair["chainId"],
-                "address": best_pair["pairAddress"]
-            }
+    def get_quote(self, from_symbol: str, to_symbol: str, amount: Decimal) -> Optional[Decimal]:
+        try:
+            from_addr = self._resolve(from_symbol)
+            to_addr   = self._resolve(to_symbol)
 
-        return None
-    except Exception as e:
-        print(f"❌ Dexscreener error for {query}: {e}")
-        time.sleep(0.5)
-        return None
+            if not from_addr or not to_addr:
+                return None
 
+            url = f"{DEXSCREENER_API}/{from_addr}"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
 
-def get_token_pairs_by_symbol(symbol: str):
-    try:
-        url = f"https://api.dexscreener.com/latest/dex/search"
-        response = requests.get(url, params={"q": symbol})
-        response.raise_for_status()
-        data = response.json()
+            pairs = data.get("pairs", [])
+            if not pairs:
+                return None
 
-        pairs = data.get("pairs", [])
-        if not isinstance(pairs, list):
-            logging.warning(f"[WARN] No valid pairs list for {symbol}: {pairs}")
-            return []
+            best_pair = max(pairs, key=lambda p: float(p.get("liquidity", {}).get("usd", 0)))
 
-        return pairs
+            price_usd = Decimal(str(best_pair["priceUsd"]))
+            if from_symbol.upper() == "USDT":
+                return amount / price_usd
+            else:
+                return amount * price_usd
 
-    except Exception as e:
-        logging.warning(f"[ERROR] Dexscreener fetch failed for {symbol}: {e}")
-        time.sleep(0.5)
-        return []
+        except Exception as e:
+            logging.warning(f"[DexScreener] Quote error {from_symbol}->{to_symbol}: {e}")
+            time.sleep(0.5)
+            return None
+
+    def swap(self, from_symbol: str, to_symbol: str, amount: Decimal) -> str:
+        return f"Simulated swap {amount} {from_symbol}->{to_symbol} via DexScreener"
