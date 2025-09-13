@@ -47,5 +47,8 @@ def refresh_tokens() -> Dict[str, Any]:
 
 TOKENS: Dict[str, Any] = load_tokens_file()
 
-def get_token(symbol: str) -> Dict[str, Any]:
-    return TOKENS.get(symbol.upper())
+def get_token(symbol: str, chain: str = "ethereum") -> Dict[str, Any]:
+    for t in TOKENS.values():
+        if t["symbol"] == symbol.upper() and t["chain"] == chain:
+            return t
+    return None
