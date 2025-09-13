@@ -5,7 +5,10 @@ from fastapi import APIRouter, Query
 from app.routing.dex_clients.oneinch import get_oneinch_route
 from app.routing.dex_clients.openocean import get_openocean_quote
 from app.strategies.arbitrage_and_twap import fetch_all_usd_prices
-
+from app.config.tokens import TOKENS
+from app.config.tokens import get_token
+from eth_abi import encode
+UNISWAP_V2_ROUTER = "0xYourSepoliaUniswapRouter" 
 from web3 import Web3
 from decimal import Decimal
 
@@ -275,13 +278,15 @@ def get_best_route(from_token: str, to_token: str, amount: float):
     time.sleep(0.1)
     try:
         oo = get_openocean_quote(from_id, to_id, amount, protocols=ALLOWED_PROTOCOLS)
-        if oo: routes.append({"source": "OpenOcean", **oo})
+        if oo:
+            routes.append({"source": "OpenOcean", **oo})
     except Exception as e:
         print(f"[OpenOcean Error] {e}")
 
     try:
         one = get_oneinch_route(from_id, to_id, amount, protocols=ALLOWED_PROTOCOLS)
-        if one: routes.append({"source": "1inch", **one})
+        if one:
+            routes.append({"source": "1inch", **one})
     except Exception as e:
         print(f"[1inch Error] {e}")
 
@@ -291,7 +296,6 @@ def get_best_route(from_token: str, to_token: str, amount: float):
     return max(routes, key=lambda r: _as_float(r.get("expectedAmountOut", 0)))
 
 router = APIRouter()
-
 @router.get("/api/routes")
 def get_routes_data(amount: float = Query(500, description="Base trade amount for route calculation")):
     try:
@@ -569,6 +573,90 @@ def _zeroex_quote_gas(from_id: str, to_id: str, amount_float: float) -> Optional
         print("[0x quote gas] failed:", e)
 
     return None
+
+def fetch_1inch_swap_tx(from_token, to_token, amount, user_address):
+    try:
+        from_info = TOKENS[from_token]
+        to_info = TOKENS[to_token]
+        amount_wei = str(int(amount * (10 ** from_info["decimals"])))
+        url = "https://api.1inch.io/v5.0/11155111/swap"
+        params = {
+            "fromTokenAddress": from_info["address"],
+            "toTokenAddress": to_info["address"],
+            "amount": amount_wei,
+            "fromAddress": user_address,
+            "slippage": 1
+        }
+
+        headers = {}
+        api_key = os.getenv("ONEINCH_API_KEY")
+        if api_key:
+            print(f"[DEBUG] ✅ ONEINCH_API_KEY yüklendi: {api_key[:6]}****")
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        print(f"[DEBUG] 1inch swap GET URL: {url}")
+        print(f"[DEBUG] 1inch swap params: {params}")
+
+        res = requests.get(url, params=params, headers=headers, timeout=15)
+        print(f"[DEBUG] 1inch raw response status: {res.status_code}")
+        print(f"[DEBUG] 1inch raw response text: {res.text[:300]}...")
+
+        if res.status_code != 200:
+            print(f"[1inch Swap Error] Status={res.status_code} Response={res.text}")
+            return None
+
+        data = res.json()
+        return data.get("tx")
+    except Exception as e:
+        print("[1inch Swap Error]", e)
+        return None
+
+def build_swap_tx(from_token: str, to_token: str, amount: float, user_address: str):
+    try:
+        print(f"[DEBUG] 🔄 build_swap_tx() called with from={from_token}, to={to_token}, amount={amount}, user={user_address}")
+
+        from_token_info = get_token(from_token, chain="sepolia")
+        to_token_info = get_token(to_token, chain="sepolia")
+
+        amount_in_wei = int(amount * (10 ** from_token_info["decimals"]))
+        deadline = int(time.time()) + 600
+        path = [from_token_info["address"], to_token_info["address"]]
+
+        data = (
+            Web3.keccak(text="swapExactETHForTokens(uint256,address[],address,uint256)")[:4]
+            + encode(
+                ["uint256", "address[]", "address", "uint256"],
+                [0, path, user_address, deadline]
+            )
+        )
+
+        return {
+            "to": Web3.to_checksum_address(UNISWAP_V2_ROUTER),
+            "data": data.hex(),
+            "value": amount_in_wei,
+            "gas": 200000,
+            "gasPrice": _current_gas_wei(),
+            "from": Web3.to_checksum_address(user_address),
+        }
+
+    except Exception as e:
+        print("[SwapTx Error]", e)
+        return None
+
+
+def get_tx_status(tx_hash: str) -> Dict[str, Any]:
+    try:
+        if not w3:
+            return {"status": "unknown"}
+        receipt = w3.eth.get_transaction_receipt(tx_hash)
+        if not receipt:
+            return {"status": "pending"}
+        status = receipt.get("status")
+        return {"status": "success" if status == 1 else "failed", "blockNumber": receipt.get("blockNumber"), "gasUsed": receipt.get("gasUsed")}
+    except Exception as e:
+        print("[TxStatus Error]", e)
+        return {"status": "unknown"}
+
 
 def _tenderly_simulate_tx(from_addr: str, to_addr: str, data: str = "0x", value: int = 0) -> Optional[Tuple[int, int]]:
     acc = os.getenv("TENDERLY_ACCOUNT")
