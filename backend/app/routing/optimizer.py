@@ -1,6 +1,20 @@
 from app.routing.route_finder import get_best_route
 import argparse
 
+def get_best_quote(from_token: str, to_token: str, amount: float) -> dict:
+    route = get_best_route(from_token.upper(), to_token.upper(), amount)
+
+    if not route:
+        return {"success": False, "message": "No optimal route found."}
+
+    return {
+        "success": True,
+        "source": route.get("source"),
+        "bestDex": route.get("bestDex"),
+        "expectedAmountOut": route.get("expectedAmountOut"),
+        "path": route.get("path")
+    }
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--from', dest='from_token', required=True)
