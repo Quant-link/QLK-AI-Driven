@@ -19,6 +19,9 @@ from app.strategies.risk import (
 from app.strategies.dca import router as dca_router, start_dca_all
 from app.strategies.market_data import router as market_data_router
 from app.routing.route_finder import router as routes_router
+from app.routing.swap import router as swap_router
+from dotenv import load_dotenv
+load_dotenv()
 
 import logging
 from decimal import Decimal, DivisionByZero
@@ -40,7 +43,7 @@ app.include_router(dca_router, prefix="/api")
 app.include_router(market_data_router, prefix="/api")
 app.include_router(routes_router, prefix="/api")
 app.include_router(risk_management_router, prefix="/api")
-
+app.include_router(swap_router, prefix="/api")
 
 @app.get("/api/arbitrage")
 def get_arbitrage():
@@ -49,11 +52,9 @@ def get_arbitrage():
         entries = fetch_token_data_extended(symbol)
         if entries:
             token_data[symbol] = entries
-
     gas_costs = fetch_gas_costs()
     result = detect_arbitrage(token_data, gas_costs)
     return result
-
 
 @app.on_event("startup")
 def auto_start_dca():
@@ -70,40 +71,31 @@ def auto_start_dca():
     except Exception as e:
         print("[AUTO] ❌ Failed to start DCA:", e, flush=True)
 
-
 def main():
     print("\n📊 Risk Overview\n")
     total_usd = Decimal("10000")
     risk_pct = Decimal("2")
     min_price = Decimal("0.01")
-
     usd_prices = fetch_all_usd_prices()
-
     print(f"{'SYMBOL':<10} {'ENTRY':>10} {'STOP-LOSS':>12} {'SIZE':>12} {'MAX DD':>10} {'SHARPE':>8} {'RISK':>6}")
     print("-" * 70)
-
     for sym, token in TOKENS.items():
         coingecko_id = token.get("coingecko_id")
         if not coingecko_id:
             continue
-
         entry = usd_prices.get(coingecko_id)
         if entry is None or entry < min_price:
             continue
-
         stop = set_stop_loss(entry, risk_pct)
         try:
             size = calculate_position_size(total_usd, risk_pct, stop, entry)
         except DivisionByZero:
             continue
-
         prices = fetch_price_history(coingecko_id, days=30)
         max_dd = calculate_max_drawdown(prices)
         sharpe = calculate_sharpe_ratio(prices)
         risk_score = calculate_risk_score(max_dd, sharpe)
-
         print(f"{sym:<10} {entry:.4f} {stop:.4f} {size:.2f} {max_dd:>9.2f}% {sharpe:>8.2f} {risk_score:>6.2f}")
-
 
 if __name__ == "__main__":
     main()
