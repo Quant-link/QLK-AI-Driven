@@ -1,45 +1,22 @@
-2025-07-23 00:57:05,108 - WARNING - OpenOcean quote failed: HTTPSConnectionPool(host='open-api.openocean.finance', port=443): Read timed out. (read timeout=10)
-2025-07-23 00:57:05,177 - WARNING - OpenOcean quote failed: HTTPSConnectionPool(host='open-api.openocean.finance', port=443): Read timed out. (read timeout=10)
-2025-07-23 00:57:16,607 - WARNING - 1inch price fetch failed: 'bnb'
-2025-07-23 00:57:16,607 - WARNING - OpenOcean quote failed: 'bnb'
-2025-07-23 00:57:16,607 - WARNING - 1inch price fetch failed: 'sol'
-2025-07-23 00:57:16,607 - WARNING - OpenOcean quote failed: 'sol'
-2025-07-23 00:57:16,607 - WARNING - 1inch price fetch failed: 'xrp'
-2025-07-23 00:57:16,607 - WARNING - OpenOcean quote failed: 'xrp'
-2025-07-23 00:57:16,607 - WARNING - 1inch price fetch failed: 'doge'
-2025-07-23 00:57:16,607 - WARNING - OpenOcean quote failed: 'doge'
-2025-07-23 00:57:16,607 - WARNING - 1inch price fetch failed: 'ada'
-2025-07-23 00:57:16,607 - WARNING - OpenOcean quote failed: 'ada'
-2025-07-23 00:57:16,725 - WARNING - 1inch price fetch failed: 'bnb'
-2025-07-23 00:57:16,725 - WARNING - OpenOcean quote failed: 'bnb'
-2025-07-23 00:57:16,725 - WARNING - 1inch price fetch failed: 'sol'
-2025-07-23 00:57:16,725 - WARNING - OpenOcean quote failed: 'sol'
-2025-07-23 00:57:16,725 - WARNING - 1inch price fetch failed: 'xrp'
-2025-07-23 00:57:16,725 - WARNING - OpenOcean quote failed: 'xrp'
-2025-07-23 00:57:16,725 - WARNING - 1inch price fetch failed: 'doge'
-2025-07-23 00:57:16,725 - WARNING - OpenOcean quote failed: 'doge'
-2025-07-23 00:57:16,725 - WARNING - 1inch price fetch failed: 'ada'
-2025-07-23 00:57:16,725 - WARNING - OpenOcean quote failed: 'ada'
-2025-07-23 00:57:22,848 - WARNING - OpenOcean quote failed: unsupported operand type(s) for *: 'float' and 'decimal.Decimal'
-2025-07-23 00:57:27,522 - WARNING - OpenOcean quote failed: unsupported operand type(s) for *: 'float' and 'decimal.Decimal'
-2025-07-23 00:57:29,326 - WARNING - OpenOcean quote failed: unsupported operand type(s) for *: 'float' and 'decimal.Decimal'
-2025-07-23 00:58:27,732 - WARNING - 1inch price fetch failed: 'bnb'
-2025-07-23 00:58:27,732 - WARNING - 1inch price fetch failed: 'bnb'
-2025-07-23 00:58:27,732 - WARNING - OpenOcean quote failed: 'bnb'
-2025-07-23 00:58:27,732 - WARNING - OpenOcean quote failed: 'bnb'
-2025-07-23 00:58:27,732 - WARNING - 1inch price fetch failed: 'sol'
-2025-07-23 00:58:27,733 - WARNING - 1inch price fetch failed: 'sol'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'sol'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'sol'
-2025-07-23 00:58:27,733 - WARNING - 1inch price fetch failed: 'xrp'
-2025-07-23 00:58:27,733 - WARNING - 1inch price fetch failed: 'xrp'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'xrp'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'xrp'
-2025-07-23 00:58:27,733 - WARNING - 1inch price fetch failed: 'doge'
-2025-07-23 00:58:27,733 - WARNING - 1inch price fetch failed: 'doge'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'doge'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'doge'
-2025-07-23 00:58:27,733 - WARNING - 1inch price fetch failed: 'ada'
-2025-07-23 00:58:27,733 - WARNING - 1inch price fetch failed: 'ada'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'ada'
-2025-07-23 00:58:27,733 - WARNING - OpenOcean quote failed: 'ada'
+2025-09-15 20:52:03,234 - INFO - [TOKENS] ✅ 9 token yüklendi. Örnek: ['WETH', 'USDT', 'USDC', 'DAI', 'WBTC']
+2025-09-15 21:10:02,591 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:10:09,191 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:10:16,652 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:10:17,914 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:16:51,930 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:16:56,288 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:17:00,837 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:17:05,632 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:20:08,811 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:20:08,814 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:20:13,307 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:20:18,017 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:20:22,671 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:26:46,481 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:26:51,076 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:26:55,624 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:26:59,864 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:27:39,106 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:27:39,131 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:27:39,143 - INFO - [DEBUG] risk_data oluşturuldu: 9 token
+2025-09-15 21:27:39,203 - INFO - [DEBUG] risk_data oluşturuldu: 9 token

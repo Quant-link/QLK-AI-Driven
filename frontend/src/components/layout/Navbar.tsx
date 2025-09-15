@@ -3,17 +3,18 @@ import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { 
-  BarChart3, 
-  TrendingUp, 
-  Route, 
-  Settings, 
+import {
+  BarChart3,
+  TrendingUp,
+  Route,
+  Settings,
   Activity,
   Zap,
   Bell,
   User,
   Menu,
-  X
+  X,
+  ArrowLeftRight
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -24,6 +25,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { WalletButton } from '@/components/wallet/WalletButton';
+import { SimpleWalletButton } from '@/components/wallet/SimpleWalletButton';
 
 interface NavigationItem {
   name: string;
@@ -39,6 +42,7 @@ interface SystemStatus {
 
 const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/', icon: BarChart3 },
+  { name: 'Swap', href: '/swap', icon: ArrowLeftRight },
   { name: 'Market Data', href: '/market-data', icon: TrendingUp },
   { name: 'Routes', href: '/routes', icon: Route },
   { name: 'Strategies', href: '/strategies', icon: Settings },
@@ -177,6 +181,9 @@ export function Navbar(): JSX.Element {
               </Badge>
             </Button>
 
+            {/* Wallet Button */}
+            <SimpleWalletButton />
+
             {/* Mobile Menu Button */}
             <Button
               variant="ghost"
@@ -232,6 +239,12 @@ export function Navbar(): JSX.Element {
             <div className="px-2 pt-2 pb-3 space-y-1">
               {navigation.map(item => renderNavigationItem(item, true))}
             </div>
+
+            {/* Mobile Wallet Button */}
+            <div className="px-3 py-2 border-t">
+              <SimpleWalletButton />
+            </div>
+
             {renderMobileStats()}
           </div>
         )}

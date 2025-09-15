@@ -4,6 +4,7 @@ import { Dashboard } from '@/pages/Dashboard';
 import { MarketData } from '@/pages/MarketData';
 import { Routes as RoutesPage } from '@/pages/Routes';
 import { Strategies } from '@/pages/Strategies';
+import { Swap } from '@/pages/Swap';
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
             <Route path="/market-data" element={<MarketData />} />
             <Route path="/routes" element={<RoutesPage />} />
             <Route path="/strategies" element={<Strategies />} />
+            <Route path="/swap" element={<Swap />} />
           </Routes>
         </main>
       </div>
