@@ -8,7 +8,10 @@ from app.strategies.arbitrage_and_twap import fetch_all_usd_prices
 from app.config.tokens import TOKENS
 from app.config.tokens import get_token
 from eth_abi import encode
-UNISWAP_V2_ROUTER = "0xYourSepoliaUniswapRouter" 
+# Mainnet Router Addresses
+UNISWAP_V2_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+UNISWAP_V3_QUOTER = "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"
+SUSHISWAP_ROUTER = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
 from web3 import Web3
 from decimal import Decimal
 
@@ -65,15 +68,23 @@ ALLOWED_PROTOCOLS = [
 ]
 
 TOKEN_ADDRESS_MAP = {
-    "USDT":  "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    "USDC":  "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    "DAI":   "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-    "WBTC":  "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-    "WETH":  "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-    "BTC":   "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-    "LINK":  "0x514910771AF9Ca656af840dff83E8264EcF986CA",
-    "UNI":   "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-    "AAVE":  "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
+    "USDT":   "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    "USDC":   "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "DAI":    "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+    "WBTC":   "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+    "WETH":   "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "BTC":    "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+    "LINK":   "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+    "UNI":    "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+    "AAVE":   "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
+    "QLK":    "0xe226B7Ae83a44Bb98F67BEA28C4ad73B0925C49E",
+    "MATIC":  "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0",
+    "CRV":    "0xD533a949740bb3306d119CC777fa900bA034cd52",
+    "COMP":   "0xc00e94Cb662C3520282E6f5717214004A7f26888",
+    "MKR":    "0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2",
+    "SNX":    "0xC011a73ee8576Fb46F5E1c5751cA3B9Fe0af2a6F",
+    "SUSHI":  "0x6B3595068778DD592e39A122f4f5a5cF09C90fE2",
+    "1INCH":  "0x111111111117dC0aa78b770fA6A738034120C302",
 }
 ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
 
@@ -199,9 +210,15 @@ def _v2_quote(router_addr: str, token_in: str, token_out: str, amount: float, la
         dec_in  = _decimals_for(token_in)
         dec_out = _decimals_for(token_out)
         amt_in_wei = int(Decimal(str(amount)) * (Decimal(10) ** dec_in))
+
+        print(f"[{label}] Checking pool: {t_in} → {t_out}")
+        print(f"[{label}] Amount: {amt_in_wei} wei")
+
         amounts = router.functions.getAmountsOut(amt_in_wei, [t_in, t_out]).call()
         out_raw = int(amounts[-1])
         expected = float(Decimal(out_raw) / (Decimal(10) ** dec_out))
+
+        print(f"[{label}] ✅ Pool exists! Output: {expected}")
 
         gas_units = 120_000 if label == "Uniswap V2" else 140_000
 
@@ -210,10 +227,11 @@ def _v2_quote(router_addr: str, token_in: str, token_out: str, amount: float, la
             "dex": label,
             "path": [token_in, token_out],
             "source": label,
-            "estimatedGas": gas_units,        
+            "estimatedGas": gas_units,
             "gasPrice": _current_gas_wei(),
         }
-    except Exception:
+    except Exception as e:
+        print(f"[{label}] ❌ Pool check failed: {e}")
         return None
 
 def _v3_quote_quoter(quoter_addr: str, token_in: str, token_out: str, amount: float, label: str) -> Optional[Dict[str, Any]]:

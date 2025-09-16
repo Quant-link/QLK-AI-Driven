@@ -61,6 +61,22 @@ def get_tokens():
 def get_quote(from_token: str, to_token: str, amount: float):
     """Gelişmiş quote sistemi - execution data ile birlikte"""
     try:
+        # Minimum amount kontrolü
+        minimum_amounts = {
+            'ETH': 0.001,    # 0.001 ETH minimum
+            'USDT': 5,       # 5 USDT minimum
+            'USDC': 5,       # 5 USDC minimum
+            'DAI': 5,        # 5 DAI minimum
+            'WETH': 0.001,   # 0.001 WETH minimum
+        }
+
+        min_amount = minimum_amounts.get(from_token.upper(), 0.001)
+        if amount < min_amount:
+            return {
+                "success": False,
+                "message": f"Minimum swap amount for {from_token} is {min_amount}"
+            }
+
         # Mevcut get_best_quote fonksiyonunu kullan ama execution data ekle
         result = get_best_quote_with_execution_data(from_token, to_token, amount)
 
@@ -90,20 +106,20 @@ def get_swap_tx(quote_id: str, user_address: str, slippage_tolerance: float = 1.
         # Source'a göre transaction oluştur
         source = quote_data.get("source", "").lower()
 
+        # ETH swap'ları için öncelikle 1inch kullan (daha güvenilir)
+        is_eth_swap = quote_data.get("execution_data", {}).get("is_eth_swap", False)
+
+        print(f"[SWAP] Source: {source}, ETH Swap: {is_eth_swap}")
+
         if source == "1inch":
             tx = build_1inch_swap_tx(quote_data, user_address, slippage_tolerance)
         elif source == "openocean":
             tx = build_openocean_swap_tx(quote_data, user_address, slippage_tolerance)
-        elif source in ["uniswap v2", "uniswap v3", "sushiswap"]:
+        elif source in ["uniswap v2", "uniswap v3", "sushiswap"] or is_eth_swap:
             tx = build_uniswap_swap_tx(quote_data, user_address, slippage_tolerance)
         else:
-            # Fallback - mevcut build_swap_tx kullan
-            tx = build_swap_tx(
-                quote_data.get("from_token", ""),
-                quote_data.get("to_token", ""),
-                quote_data.get("amount", 0),
-                user_address
-            )
+            # Fallback - Uniswap kullan
+            tx = build_uniswap_swap_tx(quote_data, user_address, slippage_tolerance)
 
         if not tx:
             return {"success": False, "message": "Swap transaction could not be built."}

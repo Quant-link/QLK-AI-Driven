@@ -11,7 +11,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useWallet } from '@/hooks/useWallet';
 import { WalletButton } from '@/components/wallet/WalletButton';
 import { SimpleWalletButton } from '@/components/wallet/SimpleWalletButton';
+import { TokenBalances } from '@/components/wallet/TokenBalances';
 import { useSimpleWallet } from '@/hooks/useSimpleWallet';
+import { useSwapExecution } from '@/hooks/useSwapExecution';
+import { formatGasPrice, calculateGasCost } from '@/utils/swapExecution';
 
 interface Token {
   symbol: string;
@@ -42,6 +45,9 @@ export function SwapInterface() {
   // Wallet hooks
   const { isConnected, address, chainId } = useWallet();
   const simpleWallet = useSimpleWallet();
+
+  // Swap execution hook
+  const swapExecution = useSwapExecution();
 
   // Simple wallet'ı kullan (daha stabil)
   const walletConnected = simpleWallet.isConnected;
@@ -80,20 +86,40 @@ export function SwapInterface() {
       return;
     }
 
+    // Minimum swap amount kontrolü
+    const amountNum = parseFloat(amount);
+    const minimumAmounts: { [key: string]: number } = {
+      'ETH': 0.001,    // 0.001 ETH minimum
+      'USDT': 5,       // 5 USDT minimum
+      'USDC': 5,       // 5 USDC minimum
+      'DAI': 5,        // 5 DAI minimum
+      'WETH': 0.001,   // 0.001 WETH minimum
+    };
+
+    const minAmount = minimumAmounts[fromToken] || 0.001;
+    if (amountNum < minAmount) {
+      setError(`Minimum swap amount for ${fromToken} is ${minAmount}`);
+      return;
+    }
+
     try {
       setIsLoadingQuote(true);
       setError('');
-      
+      swapExecution.resetState(); // Swap state'ini temizle
+
       const response = await fetch(
         `http://localhost:8000/api/quote?from_token=${fromToken}&to_token=${toToken}&amount=${amount}`,
         { method: 'POST' }
       );
-      
+
       const data = await response.json();
       setQuote(data);
-      
+
       if (!data.success) {
         setError(data.message || 'Quote alınamadı');
+      } else if (data.quote_id) {
+        // Gas estimation yap
+        swapExecution.estimateGas(data.quote_id);
       }
     } catch (err) {
       setError('Quote alınırken hata oluştu');
@@ -113,6 +139,16 @@ export function SwapInterface() {
   const handleAmountChange = (value: string) => {
     setAmount(value);
     setQuote(null); // Amount değişince quote'u temizle
+    swapExecution.resetState(); // Swap state'ini de temizle
+  };
+
+  const handleSwap = async () => {
+    if (!quote?.quote_id) {
+      setError('Quote bulunamadı');
+      return;
+    }
+
+    await swapExecution.executeSwap(quote.quote_id, 1.0); // 1% slippage
   };
 
   if (isLoadingTokens) {
@@ -127,7 +163,10 @@ export function SwapInterface() {
   }
 
   return (
-    <div className="max-w-md mx-auto space-y-4">
+    <div className="max-w-2xl mx-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Main Swap Interface */}
+        <div className="lg:col-span-2 space-y-4">
       {/* Wallet Connection Card */}
       {!walletConnected && (
         <Card className="border-dashed">
@@ -269,6 +308,25 @@ export function SwapInterface() {
                     {quote.expectedAmountOut?.toFixed(6)} {toToken}
                   </span>
                 </div>
+
+                {/* Gas Information */}
+                {swapExecution.gasEstimate && swapExecution.gasPrice && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Gas Price:</span>
+                      <span className="text-xs">
+                        {formatGasPrice(swapExecution.gasPrice)} Gwei
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Est. Gas Cost:</span>
+                      <span className="text-xs">
+                        {calculateGasCost(swapExecution.gasEstimate, swapExecution.gasPrice)} ETH
+                      </span>
+                    </div>
+                  </>
+                )}
+
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Quote ID:</span>
                   <span className="font-mono text-xs">
@@ -279,21 +337,82 @@ export function SwapInterface() {
             </Card>
           )}
 
-          {/* Swap Button - Placeholder */}
+          {/* Swap Button */}
           {quote?.success && (
-            <Button
-              className="w-full"
-              variant="default"
-              disabled={!walletConnected}
-            >
-              {!walletConnected
-                ? 'Connect Wallet to Swap'
-                : 'Swap (Coming Soon)'
-              }
-            </Button>
+            <div className="space-y-2">
+              {/* Transaction Status */}
+              {swapExecution.txHash && (
+                <Card className="bg-blue-50 border-blue-200">
+                  <CardContent className="pt-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Transaction:</span>
+                        <Badge variant={
+                          swapExecution.txStatus === 'confirmed' ? 'default' :
+                          swapExecution.txStatus === 'failed' ? 'destructive' : 'secondary'
+                        }>
+                          {swapExecution.txStatus}
+                        </Badge>
+                      </div>
+                      <div className="text-xs font-mono break-all">
+                        {swapExecution.txHash}
+                      </div>
+                      <a
+                        href={`https://etherscan.io/tx/${swapExecution.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline"
+                      >
+                        View on Etherscan →
+                      </a>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Swap Error */}
+              {swapExecution.error && (
+                <Card className="bg-red-50 border-red-200">
+                  <CardContent className="pt-4">
+                    <div className="text-sm text-red-600">
+                      {swapExecution.error}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={handleSwap}
+                disabled={
+                  !walletConnected ||
+                  swapExecution.isExecuting ||
+                  swapExecution.txStatus === 'pending'
+                }
+              >
+                {!walletConnected
+                  ? 'Connect Wallet to Swap'
+                  : swapExecution.isExecuting
+                  ? 'Executing Swap...'
+                  : swapExecution.txStatus === 'pending'
+                  ? 'Transaction Pending...'
+                  : swapExecution.txStatus === 'confirmed'
+                  ? 'Swap Completed ✓'
+                  : 'Execute Swap'
+                }
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>
+        </div>
+
+        {/* Token Balances Sidebar */}
+        <div className="space-y-4">
+          <TokenBalances />
+        </div>
+      </div>
     </div>
   );
 }

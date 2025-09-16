@@ -25,25 +25,37 @@ def get_best_quote_with_execution_data(from_token: str, to_token: str, amount: f
         from_token = from_token.upper()
         to_token = to_token.upper()
 
+        # ETH → WETH dönüşümü (DEX'ler WETH kullanır)
+        route_from_token = "WETH" if from_token == "ETH" else from_token
+        route_to_token = "WETH" if to_token == "ETH" else to_token
+
         # Token bilgilerini doğrula
-        if from_token not in TOKENS or to_token not in TOKENS:
+        if route_from_token not in TOKENS or route_to_token not in TOKENS:
             return {"success": False, "message": "Token not supported"}
 
-        from_token_info = TOKENS[from_token]
-        to_token_info = TOKENS[to_token]
+        from_token_info = TOKENS[route_from_token]
+        to_token_info = TOKENS[route_to_token]
 
         # Sadece Ethereum tokenlarını destekle (şimdilik)
         if from_token_info.get("chain") != "ethereum" or to_token_info.get("chain") != "ethereum":
             return {"success": False, "message": "Only Ethereum tokens supported currently"}
 
-        # En iyi route'u bul
-        route = get_best_route(from_token, to_token, amount)
+        # En iyi route'u bul (WETH kullanarak)
+        route = get_best_route(route_from_token, route_to_token, amount)
 
         if not route:
             return {"success": False, "message": "No optimal route found."}
 
         # Execution data ekle
         execution_data = prepare_execution_data(route, from_token_info, to_token_info, amount)
+
+        # ETH handling bilgisini ekle
+        execution_data["is_eth_swap"] = from_token == "ETH" or to_token == "ETH"
+        execution_data["original_from_token"] = from_token
+        execution_data["original_to_token"] = to_token
+
+        # Expected amount out ekle (slippage protection için)
+        execution_data["expected_amount_out"] = route.get("expectedAmountOut", 0)
 
         result = {
             "success": True,

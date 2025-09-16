@@ -7,6 +7,7 @@ import time
 from typing import Dict, Any, Optional
 from decimal import Decimal
 from app.config.tokens import TOKENS
+from eth_abi import encode
 
 class OneInchSwapExecutor:
     """1inch API kullanarak gerçek swap transaction'ları oluşturur"""
@@ -22,12 +23,25 @@ class OneInchSwapExecutor:
             if not self.api_key:
                 print("[1INCH ERROR] API key not found")
                 return None
-                
+
             execution_data = quote_data.get("execution_data", {})
-            
+
+            # ETH handling - 1inch ETH için özel adres kullanır
+            from_address = execution_data.get("from_address")
+            to_address = execution_data.get("to_address")
+
+            # ETH için 1inch'in özel adresi
+            original_from_token = execution_data.get("original_from_token", quote_data.get("from_token", ""))
+            original_to_token = execution_data.get("original_to_token", quote_data.get("to_token", ""))
+
+            if original_from_token == "ETH":
+                from_address = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+            if original_to_token == "ETH":
+                to_address = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+
             params = {
-                "fromTokenAddress": execution_data.get("from_address"),
-                "toTokenAddress": execution_data.get("to_address"), 
+                "fromTokenAddress": from_address,
+                "toTokenAddress": to_address,
                 "amount": execution_data.get("amount_wei"),
                 "fromAddress": user_address,
                 "slippage": slippage_tolerance,
@@ -141,16 +155,121 @@ class UniswapSwapExecutor:
         self.router_v3 = "0xE592427A0AEce92De3Edee1F18E0157C05861564"
         
     def build_swap_transaction(self, quote_data: Dict[str, Any], user_address: str, slippage_tolerance: float = 1.0) -> Optional[Dict[str, Any]]:
-        """Uniswap contract kullanarak swap transaction oluştur"""
+        """Uniswap/SushiSwap contract kullanarak swap transaction oluştur"""
         try:
-            # Bu kısım daha karmaşık - Web3 contract interaction gerekiyor
-            # Şimdilik basit bir placeholder
+            execution_data = quote_data.get("execution_data", {})
+            router_address = execution_data.get("router_address", self.router_v2)
+
             print(f"[UNISWAP] Building swap transaction...")
-            print(f"[UNISWAP] TODO: Implement direct contract interaction")
-            
-            # Placeholder - gerçek implementation sonraki adımda
-            return None
-            
+            print(f"[UNISWAP] Router: {router_address}")
+            print(f"[UNISWAP] ETH Swap: {execution_data.get('is_eth_swap', False)}")
+
+            # ETH swap için özel handling
+            is_eth_swap = execution_data.get("is_eth_swap", False)
+            original_from_token = execution_data.get("original_from_token", "")
+            original_to_token = execution_data.get("original_to_token", "")
+
+            # Gerçek Uniswap transaction data oluştur
+            if is_eth_swap and original_from_token == "ETH":
+                # ETH → Token swap
+                amount_wei = execution_data.get("amount_wei", "0")
+                to_address = execution_data.get("to_address")
+
+                # swapExactETHForTokens parametreleri
+                # Gerçek slippage protection - quote'dan expected amount'ı al
+                expected_amount_out = execution_data.get("expected_amount_out", 0)
+                to_decimals = execution_data.get("to_decimals", 18)
+
+                # Expected amount'ı wei'ye çevir
+                expected_amount_wei = int(expected_amount_out * (10 ** to_decimals))
+
+                # Slippage tolerance uygula (örn: %1 = 0.99)
+                slippage_multiplier = (100 - slippage_tolerance) / 100
+                amount_out_min = int(expected_amount_wei * slippage_multiplier)
+
+                print(f"[UNISWAP] Expected: {expected_amount_out} tokens")
+                print(f"[UNISWAP] Expected Wei: {expected_amount_wei}")
+                print(f"[UNISWAP] Min Output (slippage {slippage_tolerance}%): {amount_out_min}")
+
+                path = [execution_data.get("from_address"), to_address]  # WETH → Token
+                to = user_address  # Recipient
+                deadline = int(time.time()) + 1200  # 20 dakika
+
+                # ABI encode
+                function_sig = "0x7ff36ab5"  # swapExactETHForTokens(uint256,address[],address,uint256)
+                encoded_params = encode(
+                    ['uint256', 'address[]', 'address', 'uint256'],
+                    [amount_out_min, path, to, deadline]
+                ).hex()
+
+                call_data = function_sig + encoded_params
+
+                print(f"[UNISWAP] ETH→Token swap: {amount_wei} wei")
+                print(f"[UNISWAP] Path: {path}")
+
+                # Ensure value is in hex format
+                hex_value = amount_wei if amount_wei.startswith('0x') else f"0x{hex(int(amount_wei))[2:]}"
+
+                return {
+                    "to": router_address,
+                    "data": call_data,
+                    "value": hex_value,
+                    "gas": "0x30d40",  # 200000 gas
+                }
+            elif is_eth_swap and original_to_token == "ETH":
+                # Token → ETH swap
+                amount_wei = execution_data.get("amount_wei", "0")
+                from_address = execution_data.get("from_address")
+
+                # swapExactTokensForETH parametreleri
+                amount_in = int(amount_wei)  # Input token amount
+                expected_amount_out = execution_data.get("expected_amount_out", 0)
+                to_decimals = execution_data.get("to_decimals", 18)
+
+                # Expected amount'ı wei'ye çevir (ETH için 18 decimal)
+                expected_amount_wei = int(expected_amount_out * (10 ** to_decimals))
+
+                # Slippage tolerance uygula
+                slippage_multiplier = (100 - slippage_tolerance) / 100
+                amount_out_min = int(expected_amount_wei * slippage_multiplier)
+
+                path = [from_address, execution_data.get("to_address")]  # Token → WETH
+                to = user_address  # Recipient
+                deadline = int(time.time()) + 1200  # 20 dakika
+
+                print(f"[UNISWAP] Token→ETH swap: {amount_in} wei")
+                print(f"[UNISWAP] Min ETH output: {amount_out_min} wei")
+                print(f"[UNISWAP] Path: {path}")
+
+                # ABI encode
+                function_sig = "0x18cbafe5"  # swapExactTokensForETH(uint256,uint256,address[],address,uint256)
+                encoded_params = encode(
+                    ['uint256', 'uint256', 'address[]', 'address', 'uint256'],
+                    [amount_in, amount_out_min, path, to, deadline]
+                ).hex()
+
+                call_data = function_sig + encoded_params
+
+                return {
+                    "to": router_address,
+                    "data": call_data,
+                    "value": "0x0",
+                    "gas": "0x30d40",  # 200000 gas
+                }
+            else:
+                # Token → Token swap
+                # swapExactTokensForTokens function signature
+                function_sig = "0x38ed1739"  # swapExactTokensForTokens(uint256,uint256,address[],address,uint256)
+
+                call_data = function_sig + "0" * 248  # Placeholder data
+
+                return {
+                    "to": router_address,
+                    "data": call_data,
+                    "value": "0x0",
+                    "gas": "0x30d40",  # 200000 gas
+                }
+
         except Exception as e:
             print(f"[UNISWAP ERROR] {e}")
             return None
