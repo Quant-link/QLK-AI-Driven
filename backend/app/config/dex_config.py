@@ -49,6 +49,10 @@ DEX_SUPPORTED_PAIRS = {
         ("WBTC", "USDT"), ("WBTC", "USDC"), ("WBTC", "DAI"),
         ("UNI", "USDT"), ("UNI", "USDC"), ("LINK", "USDT"), ("LINK", "USDC"),
         ("AAVE", "USDT"), ("AAVE", "USDC"), ("MATIC", "USDT"), ("MATIC", "USDC"),
+
+        # Additional major pairs for Routes API
+        ("BTC", "USDT"), ("BTC", "USDC"), ("DAI", "USDT"),
+        ("QLK", "USDT"), ("QLK", "ETH"), ("QLK", "USDC"),
     },
     
     "openocean": {
@@ -66,6 +70,10 @@ DEX_SUPPORTED_PAIRS = {
         # Major token pairs
         ("WBTC", "USDT"), ("WBTC", "USDC"), ("UNI", "USDT"), ("UNI", "USDC"),
         ("LINK", "USDT"), ("LINK", "USDC"), ("AAVE", "USDT"), ("AAVE", "USDC"),
+
+        # Additional major pairs for Routes API
+        ("BTC", "USDT"), ("BTC", "USDC"), ("DAI", "USDT"),
+        ("QLK", "USDT"), ("QLK", "ETH"), ("QLK", "USDC"),
     },
     
     "uniswap": {
@@ -85,6 +93,11 @@ DEX_SUPPORTED_PAIRS = {
         
         # Major token pairs
         ("WBTC", "USDT"), ("WBTC", "USDC"), ("UNI", "USDT"), ("UNI", "USDC"),
+        ("LINK", "USDT"), ("LINK", "USDC"), ("AAVE", "USDT"), ("AAVE", "USDC"),
+
+        # Additional major pairs for Routes API
+        ("BTC", "USDT"), ("BTC", "USDC"), ("DAI", "USDT"),
+        ("QLK", "USDT"), ("QLK", "ETH"), ("QLK", "USDC"),
     }
 }
 
@@ -103,13 +116,19 @@ def get_dex_eth_address(dex_name: str) -> str:
 def is_pair_supported(dex_name: str, from_token: str, to_token: str) -> bool:
     """Check if a token pair is supported by a specific DEX"""
     dex_pairs = DEX_SUPPORTED_PAIRS.get(dex_name.lower(), set())
-    return (from_token, to_token) in dex_pairs or (to_token, from_token) in dex_pairs
+    # Convert to uppercase for comparison
+    from_token_upper = from_token.upper()
+    to_token_upper = to_token.upper()
+    return (from_token_upper, to_token_upper) in dex_pairs or (to_token_upper, from_token_upper) in dex_pairs
 
 def get_supported_dexes_for_pair(from_token: str, to_token: str) -> List[str]:
     """Get list of DEXes that support a specific token pair"""
     supported_dexes = []
+    # Convert to uppercase for comparison
+    from_token_upper = from_token.upper()
+    to_token_upper = to_token.upper()
     for dex_name, pairs in DEX_SUPPORTED_PAIRS.items():
-        if (from_token, to_token) in pairs or (to_token, from_token) in pairs:
+        if (from_token_upper, to_token_upper) in pairs or (to_token_upper, from_token_upper) in pairs:
             supported_dexes.append(dex_name)
     return supported_dexes
 
