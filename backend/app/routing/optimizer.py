@@ -11,6 +11,10 @@ def get_best_quote(from_token: str, to_token: str, amount: float) -> dict:
     if not route:
         return {"success": False, "message": "No optimal route found."}
 
+    # Hata durumları için özel handling
+    if isinstance(route, dict) and not route.get("success", True):
+        return route  # Hata mesajını olduğu gibi döndür
+
     return {
         "success": True,
         "source": route.get("source"),
@@ -25,9 +29,20 @@ def get_best_quote_with_execution_data(from_token: str, to_token: str, amount: f
         from_token = from_token.upper()
         to_token = to_token.upper()
 
-        # ETH → WETH dönüşümü (DEX'ler WETH kullanır)
-        route_from_token = "WETH" if from_token == "ETH" else from_token
-        route_to_token = "WETH" if to_token == "ETH" else to_token
+        # ETH ↔ WETH özel durumu kontrolü (dönüşüm yapmadan önce)
+        is_eth_weth_swap = (
+            (from_token == "ETH" and to_token == "WETH") or
+            (from_token == "WETH" and to_token == "ETH")
+        )
+
+        if is_eth_weth_swap:
+            # ETH ↔ WETH için özel handling - dönüşüm yapma
+            route_from_token = from_token
+            route_to_token = to_token
+        else:
+            # Normal durumda ETH → WETH dönüşümü (DEX'ler WETH kullanır)
+            route_from_token = "WETH" if from_token == "ETH" else from_token
+            route_to_token = "WETH" if to_token == "ETH" else to_token
 
         # Token bilgilerini doğrula
         if route_from_token not in TOKENS or route_to_token not in TOKENS:
@@ -45,6 +60,30 @@ def get_best_quote_with_execution_data(from_token: str, to_token: str, amount: f
 
         if not route:
             return {"success": False, "message": "No optimal route found."}
+
+        # Hata durumları için özel handling
+        if isinstance(route, dict) and not route.get("success", True):
+            error_type = route.get("error", "UNKNOWN")
+            if error_type == "PAIR_NOT_SUPPORTED":
+                return {
+                    "success": False,
+                    "message": route.get("message", "Token pair not supported"),
+                    "error": "PAIR_NOT_SUPPORTED",
+                    "supported_pairs": route.get("supported_pairs", [])
+                }
+            elif error_type == "NO_LIQUIDITY":
+                return {
+                    "success": False,
+                    "message": route.get("message", "No liquidity available"),
+                    "error": "NO_LIQUIDITY",
+                    "supported_dexes": route.get("supported_dexes", [])
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": route.get("message", "Route finding failed"),
+                    "error": error_type
+                }
 
         # Execution data ekle
         execution_data = prepare_execution_data(route, from_token_info, to_token_info, amount)

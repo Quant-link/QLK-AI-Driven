@@ -30,6 +30,9 @@ interface Quote {
   expectedAmountOut?: number;
   execution_data?: any;
   message?: string;
+  error?: string;
+  supported_pairs?: string[];
+  supported_dexes?: string[];
 }
 
 export function SwapInterface() {
@@ -116,7 +119,22 @@ export function SwapInterface() {
       setQuote(data);
 
       if (!data.success) {
-        setError(data.message || 'Quote alınamadı');
+        const errorType = data.error;
+        let errorMessage = data.message || 'Quote alınamadı';
+
+        if (errorType === 'PAIR_NOT_SUPPORTED') {
+          const alternatives = data.supported_pairs || [];
+          if (alternatives.length > 0) {
+            errorMessage += `\n\nAlternatif pair'ler:\n${alternatives.join(', ')}`;
+          }
+        } else if (errorType === 'NO_LIQUIDITY') {
+          const supportedDexes = data.supported_dexes || [];
+          if (supportedDexes.length > 0) {
+            errorMessage += `\n\nDesteklenen DEX'ler: ${supportedDexes.join(', ')}`;
+          }
+        }
+
+        setError(errorMessage);
       } else if (data.quote_id) {
         // Gas estimation yap
         swapExecution.estimateGas(data.quote_id);

@@ -44,15 +44,7 @@ export function TokenBalances({ className }: TokenBalancesProps) {
       </CardHeader>
       
       <CardContent className="space-y-2">
-        {/* ETH Balance */}
-        <div className="flex justify-between items-center py-1">
-          <span className="text-sm font-medium">ETH</span>
-          <Badge variant="secondary">
-            {balance || '0.0000'} ETH
-          </Badge>
-        </div>
-
-        {/* Token Balances */}
+        {/* Token Balances (ETH dahil) */}
         {isLoadingBalances ? (
           // Loading skeletons
           Array.from({ length: 3 }).map((_, i) => (

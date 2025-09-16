@@ -137,45 +137,73 @@ export class SwapExecutor {
     }
   }
 
-  // Gas estimation - gerçek blockchain gas price + realistic estimates
+  // Gas estimation - backend'den gerçek gas bilgisi al
   async estimateGas(
     quoteId: string,
     userAddress: string,
     slippageTolerance: number = 1.0
   ): Promise<{ gasEstimate?: string; gasPrice?: string; error?: string }> {
     try {
-      // Gerçek network gas price'ı al
-      const gasPrice = await this.provider.request({
+      // Backend'den swap transaction'ını al (gas bilgileri ile birlikte)
+      const response = await fetch(
+        `http://localhost:8000/api/swap?quote_id=${quoteId}&user_address=${userAddress}&slippage_tolerance=${slippageTolerance}`,
+        { method: 'POST' }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Backend response error: ${response.status}`);
+      }
+
+      const swapData = await response.json();
+
+      if (!swapData.success || !swapData.tx) {
+        throw new Error('Backend swap preparation failed');
+      }
+
+      const tx = swapData.tx;
+
+      // Backend'den gelen gas bilgilerini kullan
+      const gasEstimate = tx.gas;
+      const gasPrice = tx.gasPrice;
+
+      if (gasEstimate && gasPrice) {
+        console.log('✅ Gas info from backend:', { gasEstimate, gasPrice });
+        return { gasEstimate, gasPrice };
+      }
+
+      // Fallback: Network'den gas price al
+      const networkGasPrice = await this.provider.request({
         method: 'eth_gasPrice',
         params: [],
       });
-      console.log('✅ Real network gas price obtained:', gasPrice);
 
-      // Gerçek Uniswap gas estimates (mainnet data'sına dayalı)
-      // ETH → Token: ~120,000 gas
-      // Token → ETH: ~180,000 gas (approval zaten yapılmışsa)
-      // Token → Token: ~250,000 gas
+      // Swap türüne göre fallback gas estimates
+      const fallbackGasEstimate = gasEstimate || '0x2bf20'; // 180K fallback
 
-      // Konservativ estimate kullan (yüksek taraftan)
-      const gasEstimate = '0x2bf20'; // 180,000 gas (realistic for most swaps)
+      console.log('✅ Using fallback gas estimation:', {
+        gasEstimate: fallbackGasEstimate,
+        gasPrice: networkGasPrice
+      });
 
-      console.log('✅ Using realistic gas estimate for DEX swaps:', gasEstimate);
+      return {
+        gasEstimate: fallbackGasEstimate,
+        gasPrice: networkGasPrice
+      };
 
-      return { gasEstimate, gasPrice };
     } catch (error) {
       console.error('Gas estimation error:', error);
 
-      // Gerçek network gas price'ı almaya çalış
+      // Complete fallback: Network gas price + conservative estimate
       try {
         const gasPrice = await this.provider.request({
           method: 'eth_gasPrice',
           params: [],
         });
 
-        console.log('✅ Fallback: Real gas price with conservative estimate');
+        console.log('✅ Complete fallback: Network gas price with conservative estimate');
         return {
           gasEstimate: '0x30d40', // 200,000 gas (conservative fallback)
-          gasPrice: gasPrice, // Gerçek gas price
+          gasPrice: gasPrice,
         };
       } catch (gasPriceError) {
         console.error('Complete gas estimation failure:', gasPriceError);

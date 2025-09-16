@@ -45,8 +45,12 @@ def get_cached_quote(quote_id: str) -> Optional[Dict[str, Any]]:
 @router.get("/tokens")
 def get_tokens():
     """Gerçek token listesini döndür"""
+    # Token listesini refresh et
+    from app.config.tokens import refresh_tokens
+    current_tokens = refresh_tokens()
+
     tokens = []
-    for symbol, token_data in TOKENS.items():
+    for symbol, token_data in current_tokens.items():
         if token_data.get("chain") == "ethereum":  # Şimdilik sadece Ethereum
             tokens.append({
                 "symbol": symbol,

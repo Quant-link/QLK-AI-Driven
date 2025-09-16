@@ -43,7 +43,10 @@ def save_tokens_file(tokens_list: List[Dict[str, Any]]) -> None:
         json.dump(tokens_list, f, ensure_ascii=False, indent=2)
 
 def refresh_tokens() -> Dict[str, Any]:
-    return load_tokens_file()
+    """Token listesini yeniden yükle ve global TOKENS'ı güncelle"""
+    global TOKENS
+    TOKENS = load_tokens_file()
+    return TOKENS
 
 TOKENS: Dict[str, Any] = load_tokens_file()
 

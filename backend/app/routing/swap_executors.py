@@ -70,19 +70,31 @@ class OneInchSwapExecutor:
             
             # 1inch response format'ını standart format'a çevir
             tx_data = data.get("tx", {})
-            
+
+            # Quote'dan gas bilgilerini al, yoksa API'den gelen değerleri kullan
+            quote_gas_estimate = quote_data.get("gas_estimate")
+            quote_gas_price = quote_data.get("gas_price")
+
+            # Gas bilgilerini öncelik sırasına göre belirle
+            gas_estimate = tx_data.get("gas") or quote_gas_estimate or "0x30d40"  # 200K fallback
+            gas_price = tx_data.get("gasPrice") or quote_gas_price or None
+
+            # Gas price'ı hex formatına çevir
+            if gas_price and isinstance(gas_price, int):
+                gas_price = hex(gas_price)
+
             result = {
                 "to": tx_data.get("to"),
                 "data": tx_data.get("data"),
                 "value": tx_data.get("value", "0"),
-                "gas": tx_data.get("gas"),
-                "gasPrice": tx_data.get("gasPrice"),
+                "gas": gas_estimate,
+                "gasPrice": gas_price,
                 "from": user_address,
                 "chainId": 1,
                 "source": "1inch"
             }
-            
-            print(f"[1INCH] ✅ Transaction built successfully")
+
+            print(f"[1INCH] ✅ Transaction built - Gas: {gas_estimate}, Price: {gas_price}")
             return result
             
         except Exception as e:
@@ -128,13 +140,25 @@ class OpenOceanSwapExecutor:
                 return None
                 
             swap_data = data.get("data", {})
-            
+
+            # Quote'dan gas bilgilerini al, yoksa API'den gelen değerleri kullan
+            quote_gas_estimate = quote_data.get("gas_estimate")
+            quote_gas_price = quote_data.get("gas_price")
+
+            # Gas bilgilerini öncelik sırasına göre belirle
+            gas_estimate = swap_data.get("estimatedGas") or quote_gas_estimate or "0x30d40"  # 200K fallback
+            gas_price = swap_data.get("gasPrice") or quote_gas_price or None
+
+            # Gas price'ı hex formatına çevir
+            if gas_price and isinstance(gas_price, int):
+                gas_price = hex(gas_price)
+
             result = {
                 "to": swap_data.get("to"),
                 "data": swap_data.get("data"),
                 "value": swap_data.get("value", "0"),
-                "gas": swap_data.get("estimatedGas"),
-                "gasPrice": swap_data.get("gasPrice"),
+                "gas": gas_estimate,
+                "gasPrice": gas_price,
                 "from": user_address,
                 "chainId": 1,
                 "source": "openocean"
@@ -149,10 +173,43 @@ class OpenOceanSwapExecutor:
 
 class UniswapSwapExecutor:
     """Uniswap contract'ları kullanarak direkt swap transaction'ları oluşturur"""
-    
+
     def __init__(self):
         self.router_v2 = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
         self.router_v3 = "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+
+    def _estimate_gas_for_swap_type(self, quote_data: Dict, execution_data: Dict) -> str:
+        """Swap türüne göre dinamik gas estimation"""
+        try:
+            # Quote'dan gas bilgisini al
+            quote_gas_estimate = quote_data.get("gas_estimate")
+            if quote_gas_estimate:
+                # Quote'dan gelen değeri hex formatına çevir
+                if isinstance(quote_gas_estimate, int):
+                    return hex(quote_gas_estimate)
+                elif isinstance(quote_gas_estimate, str) and quote_gas_estimate.startswith('0x'):
+                    return quote_gas_estimate
+                else:
+                    return hex(int(quote_gas_estimate))
+
+            # Fallback: Swap türüne göre realistic gas estimates
+            is_eth_swap = execution_data.get("is_eth_swap", False)
+            original_from_token = execution_data.get("original_from_token", "")
+            original_to_token = execution_data.get("original_to_token", "")
+
+            if is_eth_swap and original_from_token == "ETH":
+                # ETH → Token: ~120,000 gas
+                return "0x1d4c0"  # 120,000
+            elif is_eth_swap and original_to_token == "ETH":
+                # Token → ETH: ~180,000 gas (approval zaten yapılmışsa)
+                return "0x2bf20"  # 180,000
+            else:
+                # Token → Token: ~250,000 gas
+                return "0x3d090"  # 250,000
+
+        except Exception as e:
+            print(f"[UNISWAP GAS] Estimation error: {e}")
+            return "0x30d40"  # 200,000 fallback
         
     def build_swap_transaction(self, quote_data: Dict[str, Any], user_address: str, slippage_tolerance: float = 1.0) -> Optional[Dict[str, Any]]:
         """Uniswap/SushiSwap contract kullanarak swap transaction oluştur"""
@@ -210,11 +267,20 @@ class UniswapSwapExecutor:
                 # Ensure value is in hex format
                 hex_value = amount_wei if amount_wei.startswith('0x') else f"0x{hex(int(amount_wei))[2:]}"
 
+                # Dinamik gas estimation
+                gas_estimate = self._estimate_gas_for_swap_type(quote_data, execution_data)
+
+                # Gas price'ı quote'dan al
+                gas_price = quote_data.get("gas_price")
+                if gas_price and isinstance(gas_price, int):
+                    gas_price = hex(gas_price)
+
                 return {
                     "to": router_address,
                     "data": call_data,
                     "value": hex_value,
-                    "gas": "0x30d40",  # 200000 gas
+                    "gas": gas_estimate,
+                    "gasPrice": gas_price,
                 }
             elif is_eth_swap and original_to_token == "ETH":
                 # Token → ETH swap
@@ -250,24 +316,70 @@ class UniswapSwapExecutor:
 
                 call_data = function_sig + encoded_params
 
+                # Dinamik gas estimation
+                gas_estimate = self._estimate_gas_for_swap_type(quote_data, execution_data)
+
+                # Gas price'ı quote'dan al
+                gas_price = quote_data.get("gas_price")
+                if gas_price and isinstance(gas_price, int):
+                    gas_price = hex(gas_price)
+
                 return {
                     "to": router_address,
                     "data": call_data,
                     "value": "0x0",
-                    "gas": "0x30d40",  # 200000 gas
+                    "gas": gas_estimate,
+                    "gasPrice": gas_price,
                 }
             else:
                 # Token → Token swap
-                # swapExactTokensForTokens function signature
-                function_sig = "0x38ed1739"  # swapExactTokensForTokens(uint256,uint256,address[],address,uint256)
+                amount_wei = execution_data.get("amount_wei", "0")
+                from_address = execution_data.get("from_address")
+                to_address = execution_data.get("to_address")
 
-                call_data = function_sig + "0" * 248  # Placeholder data
+                # swapExactTokensForTokens parametreleri
+                amount_in = int(amount_wei)  # Input token amount
+                expected_amount_out = execution_data.get("expected_amount_out", 0)
+                to_decimals = execution_data.get("to_decimals", 18)
+
+                # Expected amount'ı wei'ye çevir
+                expected_amount_wei = int(expected_amount_out * (10 ** to_decimals))
+
+                # Slippage tolerance uygula
+                slippage_multiplier = (100 - slippage_tolerance) / 100
+                amount_out_min = int(expected_amount_wei * slippage_multiplier)
+
+                path = [from_address, to_address]  # Token → Token
+                to = user_address  # Recipient
+                deadline = int(time.time()) + 1200  # 20 dakika
+
+                print(f"[UNISWAP] Token→Token swap: {amount_in} wei")
+                print(f"[UNISWAP] Min output: {amount_out_min} wei")
+                print(f"[UNISWAP] Path: {path}")
+
+                # ABI encode
+                function_sig = "0x38ed1739"  # swapExactTokensForTokens(uint256,uint256,address[],address,uint256)
+                encoded_params = encode(
+                    ['uint256', 'uint256', 'address[]', 'address', 'uint256'],
+                    [amount_in, amount_out_min, path, to, deadline]
+                ).hex()
+
+                call_data = function_sig + encoded_params
+
+                # Dinamik gas estimation
+                gas_estimate = self._estimate_gas_for_swap_type(quote_data, execution_data)
+
+                # Gas price'ı quote'dan al
+                gas_price = quote_data.get("gas_price")
+                if gas_price and isinstance(gas_price, int):
+                    gas_price = hex(gas_price)
 
                 return {
                     "to": router_address,
                     "data": call_data,
                     "value": "0x0",
-                    "gas": "0x30d40",  # 200000 gas
+                    "gas": gas_estimate,
+                    "gasPrice": gas_price,
                 }
 
         except Exception as e:

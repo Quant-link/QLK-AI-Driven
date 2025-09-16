@@ -93,11 +93,8 @@ export class TokenBalanceReader {
     const balancePromises = tokens.map(async (token) => {
       let balance: string;
 
-      if (token.symbol === 'ETH') {
-        // Native ETH balance
-        balance = await this.getETHBalance(userAddress);
-      } else if (token.address === '0x0000000000000000000000000000000000000000') {
-        // ETH with zero address
+      if (token.symbol === 'ETH' || token.address === '0x0000000000000000000000000000000000000000') {
+        // Native ETH balance (symbol ETH veya zero address)
         balance = await this.getETHBalance(userAddress);
       } else {
         // ERC-20 tokenlar (WETH, USDT, vs.)
