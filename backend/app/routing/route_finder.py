@@ -14,18 +14,15 @@ from app.config.dex_config import (
     get_dex_endpoint_info
 )
 from eth_abi import encode
-# Mainnet Router Addresses
 UNISWAP_V2_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
 UNISWAP_V3_QUOTER = "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"
 SUSHISWAP_ROUTER = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
 from web3 import Web3
 from decimal import Decimal
 
-# ---------- RPC ----------
 ETH_RPC_URL = os.getenv("ETH_RPC_URL", "")
 w3: Optional[Web3] = Web3(Web3.HTTPProvider(ETH_RPC_URL)) if ETH_RPC_URL else None
 
-# ---------- ABIs ----------
 UNIV2_ROUTER_ABI = [
     {
         "constant": True,
@@ -65,7 +62,6 @@ UNIV3_QUOTER_ABI = [
 UNISWAP_V2_ROUTER = Web3.to_checksum_address("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
 SUSHI_ROUTER      = Web3.to_checksum_address("0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F")
 UNISWAP_V3_QUOTER = Web3.to_checksum_address("0x61fFE014bA17989E743c5F6cB21bF9697530B21e")
-
 V3_COMMON_FEES = [500, 3000, 10000]
 
 ALLOWED_PROTOCOLS = [
@@ -156,21 +152,17 @@ def _as_float(x) -> float:
         return 0.0
 
 def _is_eth_weth_pair(from_token: str, to_token: str) -> bool:
-    """ETH ↔ WETH pair kontrolü"""
     eth_tokens = {"ETH", "WETH"}
     return (from_token in eth_tokens and to_token in eth_tokens and from_token != to_token)
 
 def _get_alternative_pairs(from_token: str, to_token: str) -> List[str]:
-    """Alternatif pair önerileri"""
     alternatives = []
 
-    # ETH ile olan pairler
     if from_token != "ETH":
         alternatives.append(f"{from_token}/ETH")
     if to_token != "ETH":
         alternatives.append(f"ETH/{to_token}")
 
-    # Stablecoin pairler
     stablecoins = ["USDT", "USDC", "DAI"]
     for stable in stablecoins:
         if from_token != stable:
@@ -178,7 +170,7 @@ def _get_alternative_pairs(from_token: str, to_token: str) -> List[str]:
         if to_token != stable:
             alternatives.append(f"{stable}/{to_token}")
 
-    return alternatives[:5]  # İlk 5 öneri
+    return alternatives[:5]
 
 def _best_label(raw: Dict[str, Any], default: str) -> str:
     for k in ("dex","protocol","bestDex","source"):
@@ -251,13 +243,11 @@ def _v2_quote(router_addr: str, token_in: str, token_out: str, amount: float, la
 
         print(f"[{label}] ✅ Pool exists! Output: {expected}")
 
-        # Dinamik gas estimation - swap türüne göre
         def estimate_gas_for_swap(token_in_addr: str, token_out_addr: str) -> int:
-            # ETH adresi kontrolü (hem zero address hem de WETH)
             eth_addresses = [
-                "0x0000000000000000000000000000000000000000",  # Zero address (ETH)
-                "0xC02aaA39b223FE8056b4c6bD41c659F2488D",      # WETH
-                "0xc02aaa39b223fe8056b4c6bd41c659f2488d"       # WETH lowercase
+                "0x0000000000000000000000000000000000000000", 
+                "0xC02aaA39b223FE8056b4c6bD41c659F2488D",      
+                "0xc02aaa39b223fe8056b4c6bd41c659f2488d"       
             ]
 
             is_eth_in = token_in_addr.lower() in [addr.lower() for addr in eth_addresses]
@@ -267,19 +257,15 @@ def _v2_quote(router_addr: str, token_in: str, token_out: str, amount: float, la
             print(f"[GAS DEBUG] Out: {token_out_addr} -> ETH: {is_eth_out}")
 
             if is_eth_in and not is_eth_out:
-                # ETH → Token: ~120,000 gas
                 print(f"[GAS DEBUG] ETH → Token: 120K gas")
                 return 120_000
             elif not is_eth_in and is_eth_out:
-                # Token → ETH: ~180,000 gas
                 print(f"[GAS DEBUG] Token → ETH: 180K gas")
                 return 180_000
             elif not is_eth_in and not is_eth_out:
-                # Token → Token: ~250,000 gas
                 print(f"[GAS DEBUG] Token → Token: 250K gas")
                 return 250_000
             else:
-                # ETH → ETH (shouldn't happen)
                 print(f"[GAS DEBUG] ETH → ETH: 120K gas")
                 return 120_000
 
@@ -330,9 +316,7 @@ def _v3_quote_quoter(quoter_addr: str, token_in: str, token_out: str, amount: fl
         expected = float(Decimal(best_out) / (Decimal(10) ** dec_out))
         name = f"Uniswap V3 ({used_fee/10000:.2%})" if used_fee else "Uniswap V3"
 
-        # Dinamik gas estimation - swap türüne göre
         def estimate_v3_gas_for_swap(token_in_addr: str, token_out_addr: str) -> int:
-            # ETH adresi kontrolü
             eth_address = "0x0000000000000000000000000000000000000000"
             weth_address = "0xC02aaA39b223FE8056b4c6bD41c659F2488D"
 
@@ -340,16 +324,12 @@ def _v3_quote_quoter(quoter_addr: str, token_in: str, token_out: str, amount: fl
             is_eth_out = token_out_addr.lower() in [eth_address.lower(), weth_address.lower()]
 
             if is_eth_in and not is_eth_out:
-                # ETH → Token: ~140,000 gas (V3 biraz daha fazla)
                 return 140_000
             elif not is_eth_in and is_eth_out:
-                # Token → ETH: ~200,000 gas
                 return 200_000
             elif not is_eth_in and not is_eth_out:
-                # Token → Token: ~280,000 gas (V3 concentrated liquidity)
                 return 280_000
             else:
-                # ETH → ETH (shouldn't happen)
                 return 140_000
 
         dynamic_gas_units = estimate_v3_gas_for_swap(token_in, token_out)
@@ -367,27 +347,28 @@ def _v3_quote_quoter(quoter_addr: str, token_in: str, token_out: str, amount: fl
         return None
 
 def get_best_route(from_token: str, to_token: str, amount: float):
-    """
-    Ana route bulma fonksiyonu - DEX pair desteği kontrolü ile
-    """
-    print(f"[ROUTE] 🔍 Searching route: {from_token} → {to_token} ({amount})")
+    print(f"[ROUTE] 🔍 Searching route: {from_token} → {to_token} (raw amount: {amount})")
 
-    # 1. ETH ↔ WETH özel durumu - önce kontrol et (token resolution'dan önce)
     if _is_eth_weth_pair(from_token, to_token):
         print(f"[ETH↔WETH] ✅ Special case detected: {from_token} → {to_token}")
         from_id = _resolve_token_input(from_token)
         to_id = _resolve_token_input(to_token)
         return {
-            "expectedAmountOut": amount,  # 1:1 ratio
+            "expectedAmountOut": amount,
             "dex": "WETH Contract",
             "path": [from_id, to_id],
             "source": "WETH Wrap/Unwrap",
-            "estimatedGas": 50_000,  # Wrap/unwrap gas cost
+            "estimatedGas": 50_000,
             "gasPrice": _current_gas_wei(),
         }
 
-    # 2. Pair desteğini kontrol et
     supported_dexes = get_supported_dexes_for_pair(from_token, to_token)
+
+    qlk_involved = (from_token.lower() == "qlk" or to_token.lower() == "qlk")
+    if qlk_involved:
+        print("[QLK] 🔒 Forcing Uniswap V2-only routing for QLK pairs")
+        supported_dexes = ["uniswap"]
+
     if not supported_dexes:
         print(f"[ROUTE] ❌ No DEX supports pair: {from_token} → {to_token}")
         return {
@@ -399,18 +380,15 @@ def get_best_route(from_token: str, to_token: str, amount: float):
 
     print(f"[ROUTE] ✅ Supported DEXes: {supported_dexes}")
 
-    # 3. Token resolution
-    routes: List[Dict[str,Any]] = []
+    routes: List[Dict[str, Any]] = []
     from_id = _resolve_token_input(from_token)
-    to_id   = _resolve_token_input(to_token)
+    to_id = _resolve_token_input(to_token)
 
     if not from_id or not to_id:
         print(f"[ROUTE] ❌ Token resolution failed: {from_token}→{from_id}, {to_token}→{to_id}")
         return None
 
-    # 4. Uniswap routing (sadece destekliyorsa)
     if "uniswap" in supported_dexes and w3:
-        # Uniswap için ETH → WETH dönüşümü
         uniswap_from = get_dex_eth_address("uniswap") if from_token == "ETH" else from_id
         uniswap_to = get_dex_eth_address("uniswap") if to_token == "ETH" else to_id
 
@@ -419,46 +397,45 @@ def get_best_route(from_token: str, to_token: str, amount: float):
         if r:
             routes.append(r)
             print(f"[UNISWAP V2] ✅ Found route: {r.get('expectedAmountOut')}")
-        r = _v2_quote(SUSHI_ROUTER, uniswap_from, uniswap_to, amount, "SushiSwap")
-        if r:
-            routes.append(r)
-            print(f"[SUSHISWAP] ✅ Found route: {r.get('expectedAmountOut')}")
-        r = _v3_quote_quoter(UNISWAP_V3_QUOTER, uniswap_from, uniswap_to, amount, "Uniswap V3")
-        if r:
-            routes.append(r)
-            print(f"[UNISWAP V3] ✅ Found route: {r.get('expectedAmountOut')}")
+
+        if not qlk_involved:
+            r = _v2_quote(SUSHI_ROUTER, uniswap_from, uniswap_to, amount, "SushiSwap")
+            if r:
+                routes.append(r)
+                print(f"[SUSHISWAP] ✅ Found route: {r.get('expectedAmountOut')}")
+            r = _v3_quote_quoter(UNISWAP_V3_QUOTER, uniswap_from, uniswap_to, amount, "Uniswap V3")
+            if r:
+                routes.append(r)
+                print(f"[UNISWAP V3] ✅ Found route: {r.get('expectedAmountOut')}")
 
     time.sleep(0.1)
 
-    # 5. OpenOcean (sadece destekliyorsa)
-    if "openocean" in supported_dexes:
-        try:
-            # ETH adresini OpenOcean formatına çevir
-            oo_from = get_dex_eth_address("openocean") if from_token == "ETH" else from_id
-            oo_to = get_dex_eth_address("openocean") if to_token == "ETH" else to_id
+    if not qlk_involved:
+        if "openocean" in supported_dexes:
+            try:
+                oo_from = get_dex_eth_address("openocean") if from_token == "ETH" else from_id
+                oo_to = get_dex_eth_address("openocean") if to_token == "ETH" else to_id
+                print(f"[OPENOCEAN] Checking route for {from_token}→{to_token}")
+                oo = get_openocean_quote(oo_from, oo_to, amount, protocols=ALLOWED_PROTOCOLS)
+                if oo:
+                    routes.append({"source": "OpenOcean", **oo})
+                    print(f"[OPENOCEAN] ✅ Found route: {oo.get('expectedAmountOut')}")
+            except Exception as e:
+                print(f"[OpenOcean Error] {e}")
 
-            print(f"[OPENOCEAN] Checking route for {from_token}→{to_token}")
-            oo = get_openocean_quote(oo_from, oo_to, amount, protocols=ALLOWED_PROTOCOLS)
-            if oo:
-                routes.append({"source": "OpenOcean", **oo})
-                print(f"[OPENOCEAN] ✅ Found route: {oo.get('expectedAmountOut')}")
-        except Exception as e:
-            print(f"[OpenOcean Error] {e}")
-
-    # 6. 1inch (sadece destekliyorsa)
-    if "1inch" in supported_dexes:
-        try:
-            # ETH adresini 1inch formatına çevir
-            oneinch_from = get_dex_eth_address("1inch") if from_token == "ETH" else from_id
-            oneinch_to = get_dex_eth_address("1inch") if to_token == "ETH" else to_id
-
-            print(f"[1INCH] Checking route for {from_token}→{to_token}")
-            one = get_oneinch_route(oneinch_from, oneinch_to, amount, protocols=ALLOWED_PROTOCOLS)
-            if one:
-                routes.append({"source": "1inch", **one})
-                print(f"[1INCH] ✅ Found route: {one.get('expectedAmountOut')}")
-        except Exception as e:
-            print(f"[1inch Error] {e}")
+        if "1inch" in supported_dexes:
+            try:
+                oneinch_from = get_dex_eth_address("1inch") if from_token == "ETH" else from_id
+                oneinch_to = get_dex_eth_address("1inch") if to_token == "ETH" else to_id
+                print(f"[1INCH] Checking route for {from_token}→{to_token}")
+                one = get_oneinch_route(oneinch_from, oneinch_to, amount, protocols=ALLOWED_PROTOCOLS)
+                if one and one.get("expectedAmountOut", 0) > 0:
+                    routes.append({"source": "1inch", **one})
+                    print(f"[1INCH] ✅ Found route: {one.get('expectedAmountOut')}")
+                else:
+                    print("[1INCH] ❌ No valid output, skipping")
+            except Exception as e:
+                print(f"[1inch Error] {e}")
 
     if not routes:
         print(f"[ROUTE] ❌ No routes found for {from_token} → {to_token}")
@@ -469,7 +446,28 @@ def get_best_route(from_token: str, to_token: str, amount: float):
             "supported_dexes": supported_dexes
         }
 
-    best_route = max(routes, key=lambda r: _as_float(r.get("expectedAmountOut", 0)))
+    routes_sorted = sorted(routes, key=lambda r: _as_float(r.get("expectedAmountOut", 0)), reverse=True)
+    best_route = routes_sorted[0]
+
+    if best_route.get("source") in ["1inch", "openocean"]:
+        native_routes = [r for r in routes_sorted if r.get("source") in ["Uniswap V2", "SushiSwap", "Uniswap V3"]]
+        if native_routes:
+            best_native = native_routes[0]
+            diff = _as_float(best_route.get("expectedAmountOut", 0)) - _as_float(best_native.get("expectedAmountOut", 0))
+            rel_diff = diff / max(_as_float(best_native.get("expectedAmountOut", 1)), 1)
+            if rel_diff < 0.005:
+                print(f"[ROUTE DEBUG] ⚠️ Tie-break: {best_route.get('source')} is only {rel_diff*100:.3f}% better,"
+                      f" selecting native route ({best_native.get('source')})")
+                best_route = best_native
+            else:
+                print(f"[ROUTE DEBUG] ✅ Keeping aggregator route: {best_route.get('source')} "
+                      f"({rel_diff*100:.3f}% better)")
+    else:
+        print(f"[ROUTE DEBUG] ✅ Selected native DEX route: {best_route.get('source')}")
+
+    print(f"[ROUTE DEBUG] Selected Best Route => DEX: {best_route.get('dex')}, "
+          f"ExpectedOut: {best_route.get('expectedAmountOut')}, "
+          f"Path: {best_route.get('path')}")
     print(f"[ROUTE] 🏆 Best route: {best_route.get('source')} - {best_route.get('expectedAmountOut', 'N/A')}")
     return best_route
 
@@ -480,20 +478,25 @@ def get_routes_data(amount: float = Query(500, description="Base trade amount fo
         usd_prices = fetch_all_usd_prices()
         routes_data = []
 
-        live_pairs = [
-            ("qlk", "usdt"), ("usdt", "qlk"),
-            ("qlk", "eth"), ("eth", "qlk"),
-            ("eth", "usdt"), ("btc", "usdt"),
-            ("link", "usdt"), ("uni", "usdt"),
-            ("aave", "usdt"), ("eth", "usdc"),
-            ("btc", "usdc"), ("dai", "usdt"),
-        ]
+        eth_tokens = [t for t in TOKENS.values() if isinstance(t, dict) and t.get("chain") == "ethereum"]
+        stablecoins = {"usdc", "usdt", "dai"}
+
+        live_pairs = []
+        for t in eth_tokens:
+            sym = t["symbol"].lower()
+            if sym in stablecoins:
+                continue
+            live_pairs.append((sym, "eth"))
+            live_pairs.append(("eth", sym))
+            for s in stablecoins:
+                live_pairs.append((sym, s))
+                live_pairs.append((s, sym))
 
         eth_price = float(usd_prices.get("eth") or 1800.0)
 
         for idx, (from_token, to_token) in enumerate(live_pairs, start=1):
             best = get_best_route(from_token, to_token, amount)
-            if not best:
+            if not best or best.get("success") is False:
                 continue
 
             expected_out = _as_float(best.get("expectedAmountOut"))
@@ -503,28 +506,8 @@ def get_routes_data(amount: float = Query(500, description="Base trade amount fo
             slippage = _as_float(best.get("slippage")) or 0.5
 
             try:
-                est: int
-                gpw: int
-
-                source = (best.get("source") or best.get("dex") or "").lower()
-                path = best.get("path") or []
-                frm = path[0] if path else _resolve_token_input(from_token)
-                to  = path[-1] if path else _resolve_token_input(to_token)
-
-                got = None
-                tx_obj = best.get("tx") or {}
-                if isinstance(tx_obj, dict):
-                    tx_to   = tx_obj.get("to", to)
-                    tx_data = tx_obj.get("data", "0x")
-                    tx_val  = int(tx_obj.get("value", 0))
-                else:
-                    tx_to   = to
-                    tx_data = "0x"
-                    tx_val  = 0
-
                 est = _estimate_gas_units_for_route(best, None, None)
                 gpw = _current_gas_wei()
-
                 eth_price_effective = float(usd_prices.get("eth") or 1800.0)
                 gas_usd = est * (gpw * 1e-18) * eth_price_effective
             except Exception as e:
@@ -532,16 +515,12 @@ def get_routes_data(amount: float = Query(500, description="Base trade amount fo
                 gas_usd = 0.0
 
             from_price = float(usd_prices.get(from_token.lower(), 0) or 0)
-            to_price   = float(usd_prices.get(to_token.lower(), 0) or 0)
-
+            to_price = float(usd_prices.get(to_token.lower(), 0) or 0)
             ideal_out = (amount / from_price) * to_price if from_price > 0 and to_price > 0 else 0.0
 
             if ideal_out > 0:
                 raw_eff = (expected_out / ideal_out) * 100.0
-                if raw_eff < 0:
-                    eff = 0.0
-                else:
-                    eff = min(raw_eff, 200.0)
+                eff = max(0.0, min(raw_eff, 200.0))
             else:
                 eff = 0.0
 
@@ -566,7 +545,6 @@ def get_routes_data(amount: float = Query(500, description="Base trade amount fo
     except Exception as e:
         print(f"[ERROR] Routes data fetch failed: {e}")
         return {"routes": []}
-
 
 @router.get("/api/route_details/{from_token}/{to_token}")
 def get_route_details(from_token: str, to_token: str, amount: float = 1000):
@@ -769,7 +747,7 @@ def fetch_1inch_swap_tx(from_token, to_token, amount, user_address):
         headers = {}
         api_key = os.getenv("ONEINCH_API_KEY")
         if api_key:
-            print(f"[DEBUG] ✅ ONEINCH_API_KEY yüklendi: {api_key[:6]}****")
+            print(f"[DEBUG] ✅ ONEINCH_API_KEY installed: {api_key[:6]}****")
             headers["Authorization"] = f"Bearer {api_key}"
 
         print(f"[DEBUG] 1inch swap GET URL: {url}")
