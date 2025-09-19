@@ -67,15 +67,6 @@ const DEX_LABEL: Record<string, string> = {
   uniswap_v2: "Uniswap V2",
   uniswap_v3: "Uniswap V3",
   sushiswap: "SushiSwap",
-  curve: "Curve",
-  balancer: "Balancer",
-  swappi: "Swappi",
-  pumpswap: "PumpSwap",
-  raydium: "Raydium",
-  pancakeswap: "PancakeSwap",
-  osmosis: "Osmosis",
-  oneinch: "1inch",
-  openocean: "OpenOcean",
 };
 function shortenAddress(addr: string, chars = 6): string {
   if (!addr) return "";
@@ -102,17 +93,18 @@ export function RecentOpportunitiesTable() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/api/arbitrage")
+    setOpportunities([]); 
+    fetch("http://localhost:8000/api/arbitrage")
       .then((res) => res.json())
       .then((data) => {
         if (!data || !Array.isArray(data.opportunities)) {
           console.error("Invalid arbitrage payload", data);
           return;
         }
-
+  
         const formatted = data.opportunities
-        .map((item: any, idx: number) => {
-          return {
+          .filter((item: any) => !item.buy_from?.includes("pulsex") && !item.sell_to?.includes("pulsex"))
+          .map((item: any, idx: number) => ({
             id: idx + 1,
             tokenA: item.symbol || "UNKNOWN",
             tokenB: "QLK",
@@ -125,14 +117,13 @@ export function RecentOpportunitiesTable() {
             gasUsed: Number(item.gas_cost_usd ?? 0),
             timestamp: item.timestamp ? new Date(item.timestamp * 1000) : new Date(),
             executionTime: item.execution_time_sec ?? null,
-            status: "detected", 
-          } as Opportunity;
-        })
+            status: item.status ?? "detected",
+          }));
         setOpportunities(formatted);
       })
       .catch((err) => console.error("Arbitrage API error", err));
   }, []);
-
+  
   const formatVolume = (volume: number) => {
     if (volume >= 1_000_000) return `$${fmt(volume / 1_000_000, 1)}M`;
     if (volume >= 1_000) return `$${fmt(volume / 1_000, 1)}K`;
