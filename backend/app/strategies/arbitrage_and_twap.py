@@ -1,16 +1,15 @@
+import json
 import time
 import logging
-import random
 import math
 from decimal import Decimal
 import requests
 from typing import Union, Tuple
 from fastapi import APIRouter
 from app.config.tokens import TOKENS
-from app.aggregator.price_feed import fetch_gas_costs, fetch_token_data_extended
+from app.aggregator.price_feed import fetch_token_data_extended, fetch_gas_costs
 from app.ai.arbitrage_detector import detect_arbitrage
-from app.routing.dex_clients.openocean import _resolve as oo_resolve
-
+from app.utils.math_utils import calculate_slippage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,17 +20,9 @@ logging.basicConfig(
     ],
 )
 
-def calculate_slippage(trade_size_usd: float, liquidity_usd: float) -> float:
-    if liquidity_usd <= 0:
-        return 100.0  
-    
-    slippage_factor = math.sqrt(trade_size_usd / liquidity_usd)
-    volatility_adjustment = 1.2  
-    return min(slippage_factor * volatility_adjustment * 100, 50.0)  
 
 def fetch_all_usd_prices() -> dict:
-    import os, requests
-
+    import os
     api_key = os.getenv("COINGECKO_API_KEY")
     base = os.getenv("COINGECKO_BASE_URL", "https://pro-api.coingecko.com/api/v3")
     qlk_id = os.getenv("QLK_CG_ID", "quantlink")
@@ -40,17 +31,8 @@ def fetch_all_usd_prices() -> dict:
     if api_key:
         headers["x-cg-pro-api-key"] = api_key
 
-    ids = [
-        "ethereum",
-        "tether",
-        "usd-coin",
-        "dai",
-        "bitcoin",
-        "chainlink",
-        "uniswap",
-        "aave",
-        qlk_id,
-    ]
+    ids = ["ethereum", "tether", "usd-coin", "dai",
+           "bitcoin", "chainlink", "uniswap", "aave", qlk_id]
 
     url = f"{base}/simple/price"
     params = {"ids": ",".join(ids), "vs_currencies": "usd"}
@@ -59,7 +41,6 @@ def fetch_all_usd_prices() -> dict:
         r = requests.get(url, headers=headers, params=params, timeout=15)
         r.raise_for_status()
         data = r.json() or {}
-
         prices = {
             "eth": Decimal(str(data.get("ethereum", {}).get("usd") or "0")),
             "usdt": Decimal(str(data.get("tether", {}).get("usd") or "0")),
@@ -71,294 +52,150 @@ def fetch_all_usd_prices() -> dict:
             "aave": Decimal(str(data.get("aave", {}).get("usd") or "0")),
             "qlk": Decimal(str(data.get(qlk_id, {}).get("usd") or "0")),
         }
-
         return prices
     except Exception as e:
-        print("[CoinGecko Error]", e)
-        return {
-            "eth": Decimal("1800.0"),
-            "usdt": Decimal("1.0"),
-            "usdc": Decimal("1.0"),
-            "dai": Decimal("1.0"),
-            "btc": Decimal("30000.0"),
-            "link": Decimal("7.0"),
-            "uni": Decimal("5.0"),
-            "aave": Decimal("60.0"),
-            "qlk": Decimal("1.0"),
-        }
+        logging.error(f"[CoinGecko Error] {e}")
+        return {}
 
-def fetch_price_from_1inch(from_symbol: str,
-                           to_symbol: str,
-                           amount: Decimal) -> Union[Decimal, None]:
+def fetch_price_from_uniswap_sushi(from_symbol: str,
+                                   to_symbol: str,
+                                   amount: Decimal):
     try:
-        print(f"📡 1inch API request for {from_symbol}→{to_symbol} started...")
+        base_address = TOKENS[from_symbol.upper()]["address"]
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{base_address}"
 
-        src_sym = _map_eth_to_weth(from_symbol)
-        dst_sym = _norm(to_symbol)
+        max_retries = 3
+        backoff = 3
+        resp = None
 
-        src = _token_info(src_sym)
-        dst = _token_info(dst_sym)
-
-        raw_amount = int(Decimal(str(amount)) * (Decimal(10) ** src["decimals"]))
-
-        resp = requests.get(
-            "https://api.1inch.dev/swap/v5.2/1/quote",
-            headers={"Authorization": "Bearer eMtNjDGH8VKvNqWfkmcKrYs15Ih7pU8r"},
-            params={
-                "src": src["address"],
-                "dst": dst["address"],
-                "amount": str(raw_amount),
-            },
-            timeout=10
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        to_amount_raw = Decimal(str(data["toAmount"]))
-        to_decimals = int((data.get("toToken") or {}).get("decimals") or dst["decimals"])
-        normalized = to_amount_raw / (Decimal(10) ** to_decimals)
-
-        print(f"[1inch] {src_sym} → {dst_sym}: amount={amount} = {normalized}")
-
-        if normalized <= 0:
-            raise ValueError("1inch returned zero or negative price")
-        return normalized
-
-    except Exception as e:
-        logging.warning(f"1inch price fetch failed: {e}")
-        return None
-
-def fetch_price_from_openocean(from_symbol: str,
-                               to_symbol: str,
-                               amount: Decimal,
-                               usd_prices: dict[str, Decimal],
-                               reference_price: Decimal = None) -> Union[Decimal, None]:
-    try:
-        print(f"📡 OpenOcean API request for {from_symbol}→{to_symbol} started...")
-
-        src_sym = _map_eth_to_weth(from_symbol)
-        dst_sym = _norm(to_symbol)
-
-        src = _token_info(src_sym)
-        dst = _token_info(dst_sym)
-
-        in_address  = src["address"]
-        in_decimals = src["decimals"]
-
-        raw_amount = int(Decimal(str(amount)) * (Decimal(10) ** in_decimals))
-        
-        resp = requests.get(
-            "https://open-api.openocean.finance/v3/eth/quote",
-            params={
-                "inTokenAddress":  in_address,
-                "outTokenAddress": dst["address"],
-                "amount":          str(raw_amount),
-                "slippage":        1,
-                "account":         "0x0000000000000000000000000000000000000000",
-                "gasPrice":        "30000000000",
-            },
-            headers={
-                "accept": "application/json",
-                "user-agent": "Mozilla/5.0 (compatible; QuantlinkBot/1.0; +https://quantlink.example)",
-            },
-            timeout=10
-        )
-        if resp.status_code == 403:
-            logging.warning("[OpenOcean] 403 Forbidden (rate limit / WAF). Falling back to other sources.")
-            return None
-
-        resp.raise_for_status()
-        payload = resp.json() or {}
-        data = payload.get("data") or {}
-
-        out_raw = Decimal(str(data.get("outAmount", "0")))
-        print(f"[DEBUG] OpenOcean raw response for {src_sym}→{dst_sym}: outAmount={out_raw}")
-
-        out_decimals = dst["decimals"]
-        normalized = out_raw / (Decimal(10) ** out_decimals)
-
-        if reference_price is not None:
-            reference_price = Decimal(str(reference_price))
-            print("[DEBUG] Reference price: %s, Initial normalized: %s" % (reference_price, normalized))
-
-            min_expected = reference_price * Decimal("0.95")
-            max_expected = reference_price * Decimal("1.05")
-
-            if normalized < min_expected or normalized > max_expected:
-                print("[DEBUG] Value out of expected range, using reference-based calculation")
-
-                if _norm(from_symbol) in ['BTC', 'ETH']:
-                    variation_pct = random.uniform(0.00001, 0.0005)
-                    print("[DEBUG] Using small variation for high-value token %s: %s" % (from_symbol, variation_pct))
-                else:
-                    variation_pct = random.uniform(0.0001, 0.005)
-
-                if random.choice([True, False]):
-                    normalized = reference_price * (Decimal("1") + Decimal(str(variation_pct)))
-                else:
-                    normalized = reference_price * (Decimal("1") - Decimal(str(variation_pct)))
-
-                print("[DEBUG] Adjusted to reference-based value: %s" % (normalized,))
-
-
+        for attempt in range(max_retries):
+            try:
+                resp = requests.get(url, timeout=10)
+                if resp.status_code == 429:
+                    logging.warning(f"[UNISWAP/SUSHI] 429 Too Many Requests "
+                                    f"(attempt {attempt+1}/{max_retries}), {backoff}s expected...")
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+                resp.raise_for_status()
+                break
+            except requests.exceptions.RequestException as e:
+                logging.error(f"[UNISWAP/SUSHI] Request error ({attempt+1}/{max_retries}): {e}")
+                time.sleep(backoff)
+                backoff *= 2
         else:
-            usd_price_from = _usd_price_for(from_symbol, usd_prices)
-            usd_price_to   = _usd_price_for(to_symbol, usd_prices)
+            logging.error(f"[UNISWAP/SUSHI] {from_symbol}->{to_symbol} için {max_retries} failed the attempt.")
+            return []
 
+        data = resp.json()
+        pairs = data.get("pairs", [])
+        if not pairs:
+            logging.warning(f"[UNISWAP/SUSHI] No pairs found for {from_symbol}")
+            return []
 
-            if usd_price_from and usd_price_to:
-                expected_rate = Decimal(str(usd_price_from)) / Decimal(str(usd_price_to))
-                print(f"[DEBUG] Expected rate from USD prices: {expected_rate}")
-                if abs(normalized - expected_rate) > expected_rate * Decimal("0.05"):  
-                    print(f"[DEBUG] Forced USD-based correction (base): {expected_rate}")
-                    normalized = expected_rate
+        valid_pairs = [
+            p for p in pairs
+            if p.get("dexId") in ["uniswap", "uniswap_v3", "sushiswap"]
+        ]
 
-                    if _norm(from_symbol) in ['BTC', 'ETH']:
-                        variation_pct = random.uniform(0.00001, 0.0005)
-                        print(f"[DEBUG] Using small USD-based variation for {from_symbol}: {variation_pct}")
-                    else:
-                        variation_pct = random.uniform(0.0001, 0.005)
+        if not valid_pairs:
+            logging.warning(f"[UNISWAP/SUSHI] No Uniswap/Sushi pools for {from_symbol}")
+            return []
 
-                    if random.choice([True, False]):
-                        normalized = expected_rate * (Decimal("1") + Decimal(str(variation_pct)))
-                    else:
-                        normalized = expected_rate * (Decimal("1") - Decimal(str(variation_pct)))
+        valid_pairs.sort(key=lambda x: float(x.get("liquidity", {}).get("usd", 0)), reverse=True)
 
-                    print(f"[DEBUG] Adjusted to USD-based value: {normalized}")
-            else:
-                if normalized > Decimal("100000"):
-                    normalized = normalized / Decimal("1000000")
-                    print(f"[DEBUG] Large value aggressively normalized to: {normalized}")
-                elif normalized < Decimal("0.00001"):
-                    normalized = normalized * Decimal("1000000")
-                    print(f"[DEBUG] Small value aggressively normalized to: {normalized}")
+        results = []
+        for p in valid_pairs:
+            try:
+                results.append({
+                    "dex": p.get("dexId"),
+                    "price": Decimal(str(p.get("priceUsd", "0"))),
+                    "liquidity": float(p.get("liquidity", {}).get("usd", 0)),
+                    "volume": float(p.get("volume", {}).get("h24", 0)),
+                    "pairAddress": p.get("pairAddress")
+                })
+            except Exception as parse_err:
+                logging.error(f"[UNISWAP/SUSHI] Parse error: {parse_err}")
+                continue
 
-        print(f"[OpenOcean] {src_sym} → {dst_sym}: amount={amount} = {normalized}")
+        logging.debug(f"[UNISWAP/SUSHI] Found {len(results)} pools for {from_symbol}, top 3: "
+                      f"{json.dumps(results[:3], indent=2, default=str)}")
 
-        if normalized <= 0:
-            raise ValueError("OpenOcean returned zero or negative price")
-
-        ENABLE_FAIR_FILTER = False
-        fair_per_token = _usd_price_for(from_symbol, usd_prices)
-        fair_usd_value = (Decimal(str(fair_per_token)) * amount) if fair_per_token else Decimal(0)
-
-        upper = fair_usd_value * Decimal(10)
-        lower = fair_usd_value / Decimal(10)
-
-        print(f"[FILTER] {from_symbol}: fair=${fair_usd_value}, bounds=({lower}, {upper}), quote={normalized}")
-
-        if ENABLE_FAIR_FILTER and (normalized < lower or normalized > upper):
-            logging.warning(f"[OpenOcean] Price out of expected range: {normalized} vs fair {fair_usd_value}")
-            return None
-
-        return normalized
+        time.sleep(1.0)
+        return results
 
     except Exception as e:
-        logging.warning(f"OpenOcean quote failed: {e}")
-        return None
+        logging.error(f"[UNISWAP/SUSHI] Price fetch failed for {from_symbol}->{to_symbol}: {e}")
+        return []
+
 
 def best_direct_quote(from_symbol: str,
                       to_symbol: str,
                       amount: Decimal,
                       usd_prices: dict[str, Decimal]) -> Union[Decimal, None]:
-    oo = fetch_price_from_openocean(from_symbol, to_symbol, amount, usd_prices)
-    if oo is not None and oo > 0:
-        return oo
-    o1 = fetch_price_from_1inch(from_symbol, to_symbol, amount)
-    if o1 is not None and o1 > 0:
-        return o1
-    return None
+    results = fetch_price_from_uniswap_sushi(from_symbol, to_symbol, amount)
+    if not results:
+        return None
+    best_pair = max(results, key=lambda x: x.get("liquidity", 0))
+    return best_pair["price"]
 
 def best_single_quote(from_symbol: str,
                       to_symbol: str,
                       amount: Decimal,
                       usd_prices: dict[str, Decimal]) -> Union[Decimal, None]:
-
     direct = best_direct_quote(from_symbol, to_symbol, amount, usd_prices)
-    if direct is not None and direct > 0:
+    if direct:
         return direct
 
     best = None
     for mid in ("WETH", "USDC"):
         a1 = best_direct_quote(from_symbol, mid, amount, usd_prices)
-        if a1 is None or a1 <= 0:
+        if not a1:
             continue
-        a2 = best_direct_quote(mid, to_symbol, a1, usd_prices)
-        if a2 is None or a2 <= 0:
+        a2 = best_direct_quote(mid, to_symbol, amount, usd_prices)
+        if not a2:
             continue
-        if best is None or a2 > best:
-            best = a2
+        price = a1 * a2
+        if best is None or price > best:
+            best = price
     return best
 
-def check_arbitrage_opportunity(
-    from_symbol: str,
-    to_symbol: str,
-    amount: Decimal,
-    usd_prices: dict[str, Decimal],
-    min_profit_pct: Decimal = Decimal("0.01"),
-    allow_single_source: bool = False,
+def check_arbitrage_opportunity(from_symbol: str,
+                                to_symbol: str,
+                                amount: Decimal,
+                                usd_prices: dict[str, Decimal],
+                                min_profit_pct: Decimal = Decimal("0.01")
 ) -> Union[Tuple[str, str, Decimal, Decimal], Tuple[None, None, None, None]]:
+    prices = fetch_price_from_uniswap_sushi(from_symbol, to_symbol, amount)
+    if not prices or len(prices) < 2:
+        return None, None, None, None
 
-    price_1inch = fetch_price_from_1inch(from_symbol, to_symbol, amount)
-    print(f"[DEBUG] 1inch price for {from_symbol}→{to_symbol}: {price_1inch}")
+    lowest = min(prices, key=lambda x: x["price"])
+    highest = max(prices, key=lambda x: x["price"])
+    if lowest["dex"] == highest["dex"]:
+        return None, None, None, None
 
-    price_openocean = fetch_price_from_openocean(
-        from_symbol, to_symbol, amount, usd_prices, reference_price=price_1inch
-    )
-    print(f"[DEBUG] OpenOcean price for {from_symbol}→{to_symbol}: {price_openocean}")
-
-    if price_1inch is None or price_openocean is None:
-        if not allow_single_source:
-            return None, None, None, None
-        if price_1inch is not None:
-            return "1inch", "1inch", Decimal("0"), Decimal("0")
-        elif price_openocean is not None:
-            return "OpenOcean", "OpenOcean", Decimal("0"), Decimal("0")
-        else:
-            return None, None, None, None
-
-    estimated_gas_usd = Decimal("15.0")
-
-    unit_price_1inch = amount / price_1inch
-    unit_price_openocean = amount / price_openocean
-
-    if unit_price_1inch < unit_price_openocean:
-        buy_from, sell_to = "1inch", "OpenOcean"
-        buy_price, sell_price = unit_price_1inch, unit_price_openocean
-    else:
-        buy_from, sell_to = "OpenOcean", "1inch"
-        buy_price, sell_price = unit_price_openocean, unit_price_1inch
-
-    profit = sell_price - buy_price
-    profit_pct = (profit / buy_price) * Decimal("100")
-
+    profit_pct = ((highest["price"] - lowest["price"]) / lowest["price"]) * Decimal("100")
     usd_price_to = _usd_price_for(to_symbol, usd_prices)
-    net_profit_usd = (profit * usd_price_to) - estimated_gas_usd
+    net_profit_usd = (highest["price"] - lowest["price"]) * usd_price_to
 
-    print(
-        f"[DEBUG] Raw profit: {profit} {to_symbol.upper()} | "
-        f"Net USD profit: {net_profit_usd} | Profit %: {profit_pct}"
-    )
-
-    if sell_price > buy_price and profit_pct >= min_profit_pct and net_profit_usd > 0:
-        return buy_from, sell_to, profit_pct, net_profit_usd
-
+    if profit_pct >= min_profit_pct and net_profit_usd > 0:
+        return lowest["dex"], highest["dex"], profit_pct, net_profit_usd
     return None, None, None, None
 
 router = APIRouter()
+
 @router.get("/api/arbitrage")
 def get_arbitrage_opportunities_api():
     token_data = {}
     gas_costs = fetch_gas_costs()
 
     for symbol in TOKENS.keys():
-        data = fetch_token_data_extended(symbol) 
+        data = fetch_token_data_extended(symbol)
         if data and len(data) >= 2:
             token_data[symbol] = data
-    print(f"🔎 DEBUG token_data keys: {list(token_data.keys())}")
-    for sym, entries in token_data.items():
-        print(f"   {sym}: {len(entries)} entries")
 
+    logging.info(f"🔎 DEBUG token_data keys: {list(token_data.keys())}")
     results = detect_arbitrage(token_data, gas_costs)
     return results
 
@@ -377,14 +214,15 @@ def execute_twap(from_symbol: str,
                  steps: int = 10,
                  delay: int = 2) -> Union[Decimal, None]:
     logging.info(f"🚀 Starting TWAP for {from_symbol} → {to_symbol}")
-
     token_usd_price = _usd_price_for(from_symbol, usd_prices)
     if token_usd_price is None or token_usd_price <= 0:
         logging.error(f"❌ Cannot TWAP {from_symbol}: no USD price")
         return None
+
     total_token = total_usd / token_usd_price
     step_token = total_token / steps
     collected: list[Decimal] = []
+
     for i in range(steps):
         out_amt = best_single_quote(from_symbol, to_symbol, step_token, usd_prices)
         if out_amt is None or out_amt <= 0:
@@ -398,53 +236,18 @@ def execute_twap(from_symbol: str,
             continue
 
         price_per_token_usd = (out_amt * usd_per_to) / step_token
-
         collected.append(price_per_token_usd)
-        logging.info(
-            f"🔄 TWAP step {i+1}/{steps}: out={out_amt} {to_symbol}, "
-            f"avg_usd_per_{from_symbol}={price_per_token_usd:.6f}"
-        )
+        logging.info(f"🔄 TWAP step {i+1}/{steps}: out={out_amt}, avg_usd_per_{from_symbol}={price_per_token_usd:.6f}")
         time.sleep(delay)
 
     if not collected:
         logging.error("❌ TWAP failed, no valid steps")
         return None
 
-    twap = sum(collected) / Decimal(len(collected))
-    logging.info(f"🎯 TWAP for {from_symbol}→{to_symbol}: {twap:.6f} USDT/token")
-    return twap
-
-def main():
-    total_usd = Decimal("10")
-    to_symbol = "usdt"
-    usd_prices = fetch_all_usd_prices()
-
-    for from_symbol in TOKENS.keys():
-        if from_symbol.lower() == to_symbol.lower():
-            continue
-
-        amount = Decimal("1")
-        buy_from, sell_to, profit_pct, net_profit_usd = check_arbitrage_opportunity(
-            from_symbol, to_symbol, amount, usd_prices
-        )
-
-        if net_profit_usd is None:
-            logging.warning(f"⚠️ Skipping {from_symbol}: no arbitrage price")
-            continue
-
-        logging.info(
-            f"{from_symbol} best arbitrage: {buy_from}->{sell_to} | "
-            f"profit% {profit_pct:.4f} | net ${net_profit_usd:.2f}"
-        )
-
-        if _usd_price_for(from_symbol, usd_prices) <= 0:
-            logging.warning(f"⚠️ Skipping TWAP for {from_symbol}: no valid USD price")
-            continue
-        execute_twap(from_symbol, to_symbol, total_usd, usd_prices)
+    return sum(collected) / Decimal(len(collected))
 
 def _norm(sym: str) -> str:
     return (sym or "").strip().upper()
-
 
 def _token_info(sym: str) -> dict:
     s = _norm(sym)
@@ -452,7 +255,6 @@ def _token_info(sym: str) -> dict:
     if not t:
         raise KeyError(f"Token {s} not found in tokens.json")
     return {"address": t["address"], "decimals": int(t["decimals"])}
-
 
 def _map_eth_to_weth(sym: str) -> str:
     return "WETH" if _norm(sym) == "ETH" else _norm(sym)
@@ -473,18 +275,9 @@ def _usd_price_for(symbol: str, usd_prices: dict[str, Decimal]) -> Decimal:
     val = usd_prices.get(key)
     return val if isinstance(val, Decimal) else Decimal(str(val or "0"))
 
-
 def scan_qlk_vs_top_tokens(base_amount_qlk: Decimal,
                            usd_prices: dict[str, Decimal]) -> list[dict]:
-
     results: list[dict] = []
-
-    try:
-        oo_resolve("QLK")
-    except Exception as e:
-        logging.error(f"QLK resolve failed: {e}")
-        return results
-
     for sym in sorted(TOKENS.keys()):
         if sym.upper() == "QLK":
             continue
@@ -495,9 +288,4 @@ def scan_qlk_vs_top_tokens(base_amount_qlk: Decimal,
             "out": str(out_amt or Decimal("0")),
             "has_liquidity": bool(out_amt and out_amt > 0),
         })
-
     return results
-
-
-if __name__ == "__main__":
-    main()
