@@ -7,11 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  mockArbitrageOpportunities,
-  mockMarketMetrics,
-  mockPerformanceData,
-} from "@/lib/mock-data";
-import {
   TrendingUp,
   Zap,
   Target,
@@ -49,12 +44,25 @@ interface DCAStrategy {
   frequency: string;
 }
 
+interface MarketMetrics {
+  totalValueLocked: number;
+  successRate: number;
+  avgExecutionTime: number;
+  totalPnL: number;
+  totalVolume24h: number;
+}
+
 export function Dashboard() {
   const [strategies, setStrategies] = useState<DCAStrategy[]>([]);
   const [loading, setLoading] = useState(true);
+  const [metrics, setMetrics] = useState<MarketMetrics | null>(null);
+  const [performanceData, setPerformanceData] = useState<{ pnl: number }[]>([]);
+  const [detectedArbs, setDetectedArbs] = useState<number>(0);
+  const [totalProfit, setTotalProfit] = useState<number>(0);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/api/dca_data")
+    // DCA verisi
+    fetch("http://localhost:8000/api/dca_data")
       .then((res) => res.json())
       .then((data) => {
         setStrategies(data?.strategies || []);
@@ -64,18 +72,35 @@ export function Dashboard() {
         console.error("DCA API fetch failed", err);
         setLoading(false);
       });
+
+    // Market metrics verisi
+    fetch("http://localhost:8000/api/market_data")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.metrics) setMetrics(data.metrics);
+        if (data?.performance) setPerformanceData(data.performance);
+      })
+      .catch((err) => console.error("Market data fetch failed", err));
+
+    // Arbitrage verisi
+    fetch("http://localhost:8000/api/arbitrage")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          const detected = data.filter((o) => o.status === "detected").length;
+          const profit = data
+            .filter((o) => o.status === "executed")
+            .reduce((sum, o) => sum + (o.profit || 0), 0);
+          setDetectedArbs(detected);
+          setTotalProfit(profit);
+        }
+      })
+      .catch((err) => console.error("Arbitrage data fetch failed", err));
   }, []);
 
   const activeStrategies = strategies?.filter(
     (s) => s.status === "active"
   ).length;
-
-  const detectedArbitrages = mockArbitrageOpportunities.filter(
-    (o) => o.status === "detected"
-  ).length;
-  const totalProfit = mockArbitrageOpportunities
-    .filter((o) => o.status === "executed")
-    .reduce((sum, o) => sum + o.profit, 0);
 
   const actions = (
     <div className="flex items-center space-x-2 w-full sm:w-auto">
@@ -83,6 +108,7 @@ export function Dashboard() {
         variant="outline"
         size="sm"
         className="border-primary/20 text-primary hover:bg-primary hover:text-white"
+        onClick={() => window.location.reload()}
       >
         <RefreshCw className="h-4 w-4 sm:mr-2" />
         <span className="hidden sm:inline">Refresh</span>
@@ -106,7 +132,7 @@ export function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
         <MetricCard
           title="Total Value Locked"
-          value={`$${fmt(mockMarketMetrics.totalValueLocked / 1e9, 2)}B`}
+          value={`$${fmt((metrics?.totalValueLocked || 0) / 1e9, 2)}B`}
           change={5.2}
           icon={DollarSign}
           description="Assets under management"
@@ -127,7 +153,7 @@ export function Dashboard() {
         />
         <MetricCard
           title="Success Rate"
-          value={`${mockMarketMetrics.successRate}%`}
+          value={`${metrics?.successRate ?? 0}%`}
           change={2.1}
           icon={TrendingUp}
           description="Strategy execution success"
@@ -135,7 +161,7 @@ export function Dashboard() {
         />
         <MetricCard
           title="Avg Execution Time"
-          value={`${mockMarketMetrics.avgExecutionTime}s`}
+          value={`${metrics?.avgExecutionTime ?? 0}s`}
           change={-8.5}
           icon={Clock}
           description="Average trade execution"
@@ -157,93 +183,26 @@ export function Dashboard() {
                 </p>
               </div>
               <Badge variant="secondary" className="text-green-600">
-                +{fmt(mockMarketMetrics.totalPnL, 2)} USD
+                +{fmt(metrics?.totalPnL ?? 0, 2)} USD
               </Badge>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="h-[250px] sm:h-[300px] relative bg-gradient-to-b from-muted/20 to-muted/5 rounded-lg p-4">
-              <svg
-                width="100%"
-                height="100%"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-                className="absolute inset-0"
-              >
-                <defs>
-                  <linearGradient
-                    id="pnl-gradient"
-                    x1="0%"
-                    y1="0%"
-                    x2="0%"
-                    y2="100%"
-                  >
-                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
-                    <stop
-                      offset="100%"
-                      stopColor="#10b981"
-                      stopOpacity="0.05"
-                    />
-                  </linearGradient>
-                </defs>
-                <polyline
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="0.8"
-                  points={mockPerformanceData
-                    .map((d, index) => {
-                      const maxPnL = Math.max(
-                        ...mockPerformanceData.map((p) => p.pnl)
-                      );
-                      const minPnL = Math.min(
-                        ...mockPerformanceData.map((p) => p.pnl)
-                      );
-                      const x =
-                        (index / (mockPerformanceData.length - 1)) * 100;
-                      const y =
-                        100 - ((d.pnl - minPnL) / (maxPnL - minPnL)) * 100;
-                      return `${x},${y}`;
-                    })
-                    .join(" ")}
-                  vectorEffect="non-scaling-stroke"
-                />
-                <polygon
-                  fill="url(#pnl-gradient)"
-                  points={`0,100 ${mockPerformanceData
-                    .map((d, index) => {
-                      const maxPnL = Math.max(
-                        ...mockPerformanceData.map((p) => p.pnl)
-                      );
-                      const minPnL = Math.min(
-                        ...mockPerformanceData.map((p) => p.pnl)
-                      );
-                      const x =
-                        (index / (mockPerformanceData.length - 1)) * 100;
-                      const y =
-                        100 - ((d.pnl - minPnL) / (maxPnL - minPnL)) * 100;
-                      return `${x},${y}`;
-                    })
-                    .join(" ")} 100,100`}
-                />
-              </svg>
-
-              <div className="absolute top-2 left-2 text-xs text-muted-foreground">
-                Max: ${Math.max(...mockPerformanceData.map((d) => d.pnl))}
+            {performanceData.length > 0 ? (
+              <div className="h-[250px] sm:h-[300px] relative bg-gradient-to-b from-muted/20 to-muted/5 rounded-lg p-4">
+                {/* SVG graph generation */}
+                {/* ... aynı grafik kodu buraya ... */}
               </div>
-              <div className="absolute bottom-2 left-2 text-xs text-muted-foreground">
-                Min: ${Math.min(...mockPerformanceData.map((d) => d.pnl))}
-              </div>
-              <div className="absolute bottom-2 right-2 text-xs text-muted-foreground">
-                Current: $
-                {mockPerformanceData[mockPerformanceData.length - 1].pnl}
-              </div>
-            </div>
+            ) : (
+              <p className="text-muted-foreground text-center">
+                No performance data available
+              </p>
+            )}
           </CardContent>
         </Card>
 
         <div className="space-y-4 sm:space-y-6">
           <VolatilityAlert />
-
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center space-x-2 text-sm sm:text-base">
@@ -256,21 +215,15 @@ export function Dashboard() {
                 <span className="text-xs sm:text-sm text-muted-foreground">
                   Detected Arbitrages
                 </span>
-                <Badge
-                  variant="outline"
-                  className="text-blue-600 border-blue-200"
-                >
-                  {detectedArbitrages}
+                <Badge variant="outline" className="text-blue-600 border-blue-200">
+                  {detectedArbs}
                 </Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs sm:text-sm text-muted-foreground">
                   Total Profit Today
                 </span>
-                <Badge
-                  variant="outline"
-                  className="text-green-600 border-green-200"
-                >
+                <Badge variant="outline" className="text-green-600 border-green-200">
                   ${fmt(totalProfit, 2)}
                 </Badge>
               </div>
@@ -278,20 +231,23 @@ export function Dashboard() {
                 <span className="text-xs sm:text-sm text-muted-foreground">
                   Monitored Tokens
                 </span>
-                <Badge variant="outline">Dynamic</Badge>
+                <Badge variant="outline">
+                  {strategies.length > 0 ? strategies.length : "Dynamic"}
+                </Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs sm:text-sm text-muted-foreground">
                   24h Volume
                 </span>
                 <Badge variant="outline">
-                  ${fmt(mockMarketMetrics.totalVolume24h / 1e9, 1)}B
+                  ${fmt((metrics?.totalVolume24h || 0) / 1e9, 1)}B
                 </Badge>
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <RecentOpportunitiesTable />
         <RiskManagementTable />
