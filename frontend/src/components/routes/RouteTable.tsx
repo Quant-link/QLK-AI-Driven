@@ -184,7 +184,7 @@ export function RouteTable() {
               const prettyDex = normalizeDex(rawDex);
 
               const amountStr = route.amount
-                ? `$${Number(route.amount).toLocaleString()}`
+                ? `${Number(route.amount).toLocaleString()} ${route.from_token}`
                 : "-";
 
               const expected =
