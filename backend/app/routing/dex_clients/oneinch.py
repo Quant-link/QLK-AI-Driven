@@ -5,6 +5,7 @@ from functools import lru_cache
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
 from app.config.tokens import TOKENS
+
 load_dotenv()
 
 CHAIN_ID = int(os.getenv("ONEINCH_CHAIN_ID", "1"))
@@ -13,14 +14,12 @@ BASE = f"https://api.1inch.dev/swap/v5.2/{CHAIN_ID}"
 
 TOKENS_URL = f"{BASE}/tokens"
 QUOTE_URL  = f"{BASE}/quote"
-SWAP_URL   = f"{BASE}/swap" 
+SWAP_URL   = f"{BASE}/swap"
 
 HEADERS = {
     "accept": "application/json",
     "Authorization": f"Bearer {ONEINCH_API_KEY}",
 }
-
-# ----------------------------- Helpers -----------------------------
 
 PROTOCOL_LABELS: Dict[str, str] = {
     "UNISWAP": "Uniswap",
@@ -124,18 +123,25 @@ def _decimals_for_address(address: str, default: int = 18) -> int:
         pass
     return default
 
-# ----------------------------- Main -----------------------------
 def get_oneinch_route(
     from_id: str,
     to_id: str,
     amount: float,
     protocols: Optional[List[str]] = None,
-) -> dict:
+) -> Optional[dict]:
     if not ONEINCH_API_KEY:
         raise RuntimeError("ONEINCH_API_KEY missing in environment")
 
+    if amount <= 0:
+        print(f"[1inch] ❌ Amount is 0 or negative ({amount}), skipping quote")
+        return None
+
     from_dec = _decimals_for_address(from_id, default=18)
     amount_wei = int(Decimal(str(amount)) * (Decimal(10) ** from_dec))
+
+    if amount_wei <= 0:
+        print(f"[1inch] ❌ Computed amount_wei={amount_wei}, skipping quote")
+        return None
 
     params = {
         "src": from_id,
@@ -145,15 +151,16 @@ def get_oneinch_route(
     if protocols:
         params["protocols"] = ",".join(protocols)
 
+    print(f"[1inch] Request params: src={from_id}, dst={to_id}, amount_wei={amount_wei}")
+
     r = requests.get(QUOTE_URL, headers=HEADERS, params=params, timeout=20)
     r.raise_for_status()
     q = r.json() or {}
 
-    # -------- DEBUG --------
     try:
         import json
         print("\n--- 1inch QUOTE RAW RESPONSE ---")
-        print(json.dumps(q, indent=2)[:8000])
+        print(json.dumps(q, indent=2)[:2000])
         print("--- END RESPONSE ---\n")
     except Exception:
         pass
@@ -167,11 +174,24 @@ def get_oneinch_route(
     to_dec = 18
     to_token = q.get("toToken") or {}
     try:
-        to_dec = int(to_token.get("decimals", 18))
+        if "decimals" in to_token:
+            to_dec = int(to_token["decimals"])
+        else:
+            dst_addr = params.get("dst")
+            if dst_addr:
+                to_dec = _decimals_for_address(dst_addr, default=18)
     except Exception:
-        pass
+        dst_addr = params.get("dst")
+        if dst_addr:
+            to_dec = _decimals_for_address(dst_addr, default=18)
 
     expected_out = float(Decimal(to_amount_raw) / (Decimal(10) ** to_dec))
+
+    print(f"[1inch] Expected out: {expected_out} (decimals={to_dec})")
+
+    if expected_out <= 0:
+        print(f"[1inch] ❌ Expected amount out is 0, skipping")
+        return None
 
     best_dex = _pick_best_dex_from_1inch(q)
 
@@ -182,8 +202,6 @@ def get_oneinch_route(
     except Exception:
         pass
 
-    gas_price = None
-
     return {
         "expectedAmountOut": expected_out,
         "dex": best_dex,
@@ -191,11 +209,9 @@ def get_oneinch_route(
         "bestRoute": q.get("route") or q.get("routes"),
         "path": [from_id, to_id],
         "estimatedGas": gas_est,
-        "gasPrice": gas_price,
+        "gasPrice": q.get("gasPrice"),
         "source": "1inch",
     }
-
-# ----------------------------- Client -----------------------------
 
 class OneInchClient:
     name = "1inch"
@@ -214,26 +230,17 @@ class OneInchClient:
         return info["address"], info["decimals"]
 
     def get_quote(self, from_symbol: str, to_symbol: str, amount: Decimal) -> Decimal:
-            from_symbol = from_symbol.upper()
-            to_symbol = to_symbol.upper()
+        from_symbol = from_symbol.upper()
+        to_symbol = to_symbol.upper()
 
-            from_addr, from_dec = self._resolve_symbol(from_symbol)
-            to_addr, to_dec     = self._resolve_symbol(to_symbol)
+        from_addr, _from_dec = self._resolve_symbol(from_symbol)
+        to_addr, _to_dec     = self._resolve_symbol(to_symbol)
 
-            amount_wei = int(Decimal(amount) * (Decimal(10) ** from_dec))
-            params = {"src": from_addr, "dst": to_addr, "amount": str(amount_wei)}
-            r = requests.get(QUOTE_URL, headers=HEADERS, params=params, timeout=20)
-            r.raise_for_status()
-            q = r.json() or {}
+        route = get_oneinch_route(from_addr, to_addr, float(amount))
+        if not route:
+            return Decimal(0)
 
-            to_amount_raw = q.get("toAmount") or 0
-            try:
-                to_amount_raw = int(to_amount_raw)
-            except Exception:
-                to_amount_raw = 0
-
-            tdec = int((q.get("toToken") or {}).get("decimals", to_dec))
-            return Decimal(to_amount_raw) / (Decimal(10) ** tdec)
+        return Decimal(str(route.get("expectedAmountOut", 0)))
 
     def swap(self, from_symbol: str, to_symbol: str, amount: Decimal) -> str:
         from_symbol = from_symbol.upper()
@@ -248,10 +255,10 @@ class OneInchClient:
             "src": from_addr,
             "dst": to_addr,
             "amount": str(sell_amount),
-            "from": os.getenv("SIM_FROM_ADDRESS", ""),  
+            "from": os.getenv("SIM_FROM_ADDRESS", ""),
             "slippage": os.getenv("SLIPPAGE_BPS", "1"),
-            "disableEstimate": "true",                 
-            "allowPartialFill": "false"               
+            "disableEstimate": "true",
+            "allowPartialFill": "false"
         }
 
         r = requests.get(SWAP_URL, headers=HEADERS, params=params, timeout=20)
