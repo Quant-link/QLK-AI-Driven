@@ -26,7 +26,6 @@ CG_KEY = os.getenv("COINGECKO_API_KEY")
 if CG_KEY:
     CG_HEADERS["x-cg-pro-api-key"] = CG_KEY
 
-
 def fetch_from_coingecko(cg_id: str) -> Optional[Dict[str, Any]]:
     try:
         url = f"{CG_BASE_URL}/coins/{cg_id}"
@@ -40,22 +39,20 @@ def fetch_from_coingecko(cg_id: str) -> Optional[Dict[str, Any]]:
             "price": (market.get("current_price") or {}).get("usd"),
             "high_24h": (market.get("high_24h") or {}).get("usd"),
             "low_24h": (market.get("low_24h") or {}).get("usd"),
+            "change_24h": market.get("price_change_percentage_24h"),
         }
     except Exception as e:
         logging.error(f"[ERROR] CG fetch {cg_id}: {e}")
         return None
 
-
 def set_stop_loss(entry_price: Decimal, risk_pct: Decimal) -> Decimal:
     return entry_price * (Decimal(1) - risk_pct / Decimal(100))
-
 
 def calculate_position_size(total_usd: Decimal, risk_pct: Decimal, stop: Decimal, entry: Decimal) -> Decimal:
     risk_amount = total_usd * (risk_pct / Decimal(100))
     if entry <= stop:
         raise DivisionByZero("Stop loss >= entry price")
     return risk_amount / (entry - stop)
-
 
 def fetch_price_history(cg_id: str, days: int = 30) -> List[Decimal]:
     try:
@@ -71,7 +68,6 @@ def fetch_price_history(cg_id: str, days: int = 30) -> List[Decimal]:
         logging.error(f"[ERROR] history {cg_id}: {e}")
         return []
 
-
 def calculate_max_drawdown(prices: List[Decimal]) -> float:
     if not prices:
         return 0.0
@@ -85,7 +81,6 @@ def calculate_max_drawdown(prices: List[Decimal]) -> float:
             max_dd = dd
     return float(max_dd * 100)
 
-
 def calculate_sharpe_ratio(prices: List[Decimal]) -> float:
     if len(prices) < 2:
         return 0.0
@@ -96,6 +91,29 @@ def calculate_sharpe_ratio(prices: List[Decimal]) -> float:
     if std_dev == 0:
         return 0.0
     return float(mean_return) / std_dev * math.sqrt(365)
+
+def calculate_volatility(price: float, high_24h: float, low_24h: float, change_24h: Optional[float]) -> float:
+    vol = None
+    try:
+        if high_24h and low_24h and price:
+            vol = (high_24h - low_24h) / price
+    except Exception:
+        vol = None
+
+    if (vol is None or vol <= 0) and change_24h is not None:
+        try:
+            vol = abs(change_24h) / 100
+        except Exception:
+            vol = 0
+
+    try:
+        vol = float(vol or 0)
+        if vol < 0 or vol > 5:
+            logging.warning(f"[CLAMP] volatility too high ({vol}), forced to 0")
+            vol = 0
+    except:
+        vol = 0
+    return vol
 
 
 def calculate_risk_score(max_dd: float, sharpe: float) -> float:
@@ -133,6 +151,14 @@ def get_risk_management() -> Dict[str, List[Dict[str, Any]]]:
             prices = fetch_price_history(cg_id, days=30)
             max_dd = calculate_max_drawdown(prices)
             sharpe = calculate_sharpe_ratio(prices)
+
+            volatility = calculate_volatility(
+                price=float(entry),
+                high_24h=cg_data.get("high_24h"),
+                low_24h=cg_data.get("low_24h"),
+                change_24h=cg_data.get("change_24h"),
+            )
+
             risk_score = calculate_risk_score(max_dd, sharpe)
 
             results.append({
@@ -142,7 +168,7 @@ def get_risk_management() -> Dict[str, List[Dict[str, Any]]]:
                 "stop_loss": float(stop),
                 "position_size": float(size),
                 "risk_percentage": float(risk_pct),
-                "volatility": 2.0,
+                "volatility": volatility,
                 "risk_score": risk_score,
                 "max_drawdown": max_dd,
                 "sharpe_ratio": sharpe,
