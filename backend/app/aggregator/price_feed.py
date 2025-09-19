@@ -1,76 +1,80 @@
+import logging
 import requests
-import random
 import math
 import time
 import os
 from typing import Optional
+from decimal import Decimal
 from app.config.tokens import TOKENS
+import json
 
+_TOKEN_CACHE = {}
+_TOKEN_CACHE_TTL = 60 
 
 def fetch_token_data(symbol):
-    if symbol not in TOKENS:
+    now = time.time()
+
+    if symbol in _TOKEN_CACHE:
+        ts, cached_data = _TOKEN_CACHE[symbol]
+        if now - ts < _TOKEN_CACHE_TTL:
+            logging.debug(f"[CACHE] Returning cached result for {symbol}")
+            return cached_data
+
+    token_info = TOKENS.get(symbol)
+    if not token_info:
         return []
 
-    token_info = TOKENS[symbol]
-
-    if "address" in token_info and token_info["address"]:
-        address = token_info["address"]
+    address = token_info.get("address")
+    if address:
         url = f"https://api.dexscreener.com/latest/dex/search?q={address}"
-        is_pairs_api = False
-
-    elif "search" in token_info and token_info["search"]:
+    elif token_info.get("search"):
         search_term = token_info["search"]
         url = f"https://api.dexscreener.com/latest/dex/search?q={search_term}"
-        is_pairs_api = False
-
     else:
-        print(f"⚠️ {symbol} has no usable address or search term.")
+        logging.warning(f"⚠️ {symbol} has no usable address or search term.")
         return []
 
-    print(f"\n🔍 Fetching ({'pairs' if is_pairs_api else 'search'}) {symbol} from {url}...")
     try:
         response = requests.get(url, timeout=10)
+        if response.status_code == 429:
+            logging.warning(f"[RATE LIMIT] DexScreener rate-limited for {symbol}, retrying...")
+            time.sleep(3) 
+            response = requests.get(url, timeout=10)
+        time.sleep(1.0) 
     except Exception as e:
-        print(f"❌ Request error for {symbol}: {e}")
+        logging.error(f"❌ Request error for {symbol}: {e}")
         return []
 
     if response.status_code != 200:
-        print(f"❌ Failed to fetch {symbol}, status={response.status_code}")
+        logging.error(f"❌ Failed to fetch {symbol}, status={response.status_code}")
         return []
 
     data = response.json()
-
-    if is_pairs_api:
-        pair = data.get("pair")
-        if not pair:
-            print(f"[WARN] No pairs found for {symbol} from {url}")
-            return []
-        pairs = [pair]
-    else:
-        pairs = data.get("pairs", [])
-        if not pairs:
-            print(f"[WARN] No pairs found for {symbol} from {url}")
-            return []
+    pairs = data.get("pairs", [])
+    if not pairs:
+        logging.warning(f"[WARN] No pairs found for {symbol} from {url}")
+        _TOKEN_CACHE[symbol] = (now, [])
+        return []
 
     results = []
-    for pair in pairs[:3]:
+    for pair in pairs[:3]:  
         try:
             results.append({
                 "symbol": symbol.upper(),
-                "dex": pair.get("dexId", None),
+                "dex": pair.get("dexId"),
                 "price": float(pair["priceUsd"]),
                 "liquidity": float(pair["liquidity"]["usd"]),
                 "volume": float(pair["volume"]["h24"]),
-                "volatility": round(random.uniform(0.0, 5.0), 2),
+                "volatility": None,
                 "timestamp": pair.get("timestamp") or None,
-                "chain": (pair.get("chainId") or token_info.get("chain")) 
+                "chain": pair.get("chainId") or token_info.get("chain")
             })
         except Exception as e:
-            print(f"⚠️ Parse error for {symbol}: {e}")
+            logging.warning(f"⚠️ Parse error for {symbol}: {e}")
             continue
 
+    _TOKEN_CACHE[symbol] = (now, results)
     return results
-
 
 def fetch_gas_costs() -> dict:
     try:
@@ -79,58 +83,51 @@ def fetch_gas_costs() -> dict:
             timeout=3
         )
         eth_data = eth_resp.json()
-        eth = {
-            "standard": float(eth_data["result"]["SafeGasPrice"]),
-            "fast": float(eth_data["result"]["ProposeGasPrice"]),
-            "instant": float(eth_data["result"]["FastGasPrice"]),
-        }
-
         return {
-            "ethereum": eth,
-            "bsc": {"standard": 5, "fast": 6, "instant": 8},
-            "polygon": {"standard": 35, "fast": 45, "instant": 60}
+            "ethereum": {
+                "standard": float(eth_data["result"]["SafeGasPrice"]),
+                "fast": float(eth_data["result"]["ProposeGasPrice"]),
+                "instant": float(eth_data["result"]["FastGasPrice"]),
+            }
         }
-
     except Exception as e:
-        print(f"[ERROR] Gas API failed: {e}")
-        return {
-            "ethereum": {"standard": 25, "fast": 30, "instant": 40},
-            "bsc": {"standard": 5, "fast": 6, "instant": 8},
-            "polygon": {"standard": 35, "fast": 45, "instant": 60}
-        }
-
+        logging.error(f"[ERROR] Gas API failed: {e}")
+        return {}
 
 def calculate_slippage(trade_size_usd: float, liquidity_usd: float) -> float:
     if liquidity_usd <= 0:
         return 100.0
-
     slippage_factor = math.sqrt(trade_size_usd / liquidity_usd)
-    volatility_adjustment = 1.2
-
-    slippage_pct = slippage_factor * volatility_adjustment * 100
-    return min(slippage_pct, 50.0)
-
+    return min(slippage_factor * 1.2 * 100, 50.0)
 
 def fetch_token_data_extended(symbol: str):
-    from app.config.constants import QLK_SUPPORTED_DEX
+    try:
+        from app.strategies.arbitrage_and_twap import fetch_price_from_uniswap_sushi
+        data = fetch_price_from_uniswap_sushi("QLK", symbol, Decimal("1"))
+        logging.debug(f"[DEBUG] Raw data from fetch_price_from_uniswap_sushi for {symbol}: {json.dumps(data, indent=2, default=str)}")
 
-    raw = fetch_token_data(symbol)
-    if not raw:
+        if data:
+            best_pair = max(data, key=lambda x: x.get("liquidity", 0))
+            return [{
+                "symbol": symbol.upper(),
+                "dex": best_pair["dex"],
+                "price": float(best_pair["price"]),
+                "liquidity": best_pair["liquidity"],
+                "volume": best_pair["volume"],
+                "volatility": None,
+                "timestamp": None,
+                "chain": "ethereum",
+                "pairAddress": best_pair["pairAddress"]
+            }]
+        else:
+            logging.warning(f"[TOKEN_DATA] No liquidity for {symbol}")
+            return []
+    except Exception as e:
+        logging.error(f"[TOKEN_DATA] Failed to fetch price for {symbol}: {e}")
         return []
 
-    filtered = []
-    for e in raw:
-        dex = (e.get("dex") or "").lower()
-        item = dict(e)
-        item["dex"] = dex 
-        if dex in QLK_SUPPORTED_DEX:
-            filtered.append(item)
-
-    return filtered if filtered else raw
-
-
 _CG_CACHE = {"ts": 0, "usd_per_qlk": None}
-_CG_TTL = 60  # saniye
+_CG_TTL = 60
 
 def get_usd_per_qlk() -> Optional[float]:
     now = time.time()
@@ -156,5 +153,5 @@ def get_usd_per_qlk() -> Optional[float]:
         _CG_CACHE.update({"ts": now, "usd_per_qlk": price})
         return price
     except Exception as e:
-        print(f"[ERROR] Failed to fetch QLK price: {e}")
+        logging.error(f"[ERROR] Failed to fetch QLK price: {e}")
         return None
