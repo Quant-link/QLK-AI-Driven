@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter
 from app.config.tokens import TOKENS
@@ -13,46 +14,64 @@ if CG_KEY:
     CG_HEADERS["x-cg-pro-api-key"] = CG_KEY
 
 def fetch_from_coingecko(cg_id: str) -> Optional[Dict[str, Any]]:
-    try:
-        url = f"{CG_BASE_URL}/coins/{cg_id}"
-        res = requests.get(url, headers=CG_HEADERS, timeout=15)
-        if res.status_code != 200:
-            print(f"[WARN] CG {cg_id} {res.status_code}")
-            return None
-        data = res.json()
-        market = data.get("market_data", {}) or {}
+    max_retries = 3
+    retry_delay = 2
 
-        price = (market.get("current_price") or {}).get("usd")
-        high_24h = (market.get("high_24h") or {}).get("usd")
-        low_24h = (market.get("low_24h") or {}).get("usd")
+    for attempt in range(max_retries):
+        try:
+            url = f"{CG_BASE_URL}/coins/{cg_id}"
+            res = requests.get(url, headers=CG_HEADERS, timeout=15)
 
-        volatility = None
-        if high_24h and low_24h and price:
-            try:
-                volatility = (high_24h - low_24h) / price
-            except Exception:
-                volatility = None
+            if res.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    print(f"[RATE_LIMIT] CG {cg_id} 429 - Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[WARN] CG {cg_id} 429 - Max retries exceeded")
+                    return None
 
-        return {
-            "id": data.get("id"),
-            "symbol": (data.get("symbol") or "").upper(),
-            "name": data.get("name"),
-            "price": price,
-            "change_24h": market.get("price_change_percentage_24h"),
-            "change_7d": market.get("price_change_percentage_7d"),
-            "volume_24h": (market.get("total_volume") or {}).get("usd"),
-            "market_cap": (market.get("market_cap") or {}).get("usd"),
-            "liquidity": (market.get("total_value_locked") or {}).get("usd"),
-            "circulating_supply": market.get("circulating_supply"),
-            "total_supply": market.get("total_supply"),
-            "fdv": (market.get("fully_diluted_valuation") or {}).get("usd"),
-            "ath": (market.get("ath") or {}).get("usd"),
-            "atl": (market.get("atl") or {}).get("usd"),
-            "volatility": volatility,
-        }
-    except Exception as e:
-        print(f"[ERROR] CG fetch {cg_id}: {e}")
-        return None
+            if res.status_code != 200:
+                print(f"[WARN] CG {cg_id} {res.status_code}")
+                continue
+
+            data = res.json()
+            market = data.get("market_data", {}) or {}
+
+            price = (market.get("current_price") or {}).get("usd")
+            high_24h = (market.get("high_24h") or {}).get("usd")
+            low_24h = (market.get("low_24h") or {}).get("usd")
+
+            volatility = None
+            if high_24h and low_24h and price:
+                try:
+                    volatility = (high_24h - low_24h) / price
+                except Exception:
+                    volatility = None
+
+            return {
+                "id": data.get("id"),
+                "symbol": (data.get("symbol") or "").upper(),
+                "name": data.get("name"),
+                "price": price,
+                "change_24h": market.get("price_change_percentage_24h"),
+                "change_7d": market.get("price_change_percentage_7d"),
+                "volume_24h": (market.get("total_volume") or {}).get("usd"),
+                "market_cap": (market.get("market_cap") or {}).get("usd"),
+                "liquidity": (market.get("total_value_locked") or {}).get("usd"),
+                "circulating_supply": market.get("circulating_supply"),
+                "total_supply": market.get("total_supply"),
+                "fdv": (market.get("fully_diluted_valuation") or {}).get("usd"),
+                "ath": (market.get("ath") or {}).get("usd"),
+                "atl": (market.get("atl") or {}).get("usd"),
+                "volatility": volatility,
+            }
+        except Exception as e:
+            print(f"[ERROR] CG fetch {cg_id}: {e}")
+            continue
+
+    return None
 
 def fetch_from_coinbase(symbol: str) -> Optional[Dict[str, Any]]:
     try:
@@ -107,7 +126,7 @@ def fetch_from_dexscreener(address: str) -> Optional[Dict[str, Any]]:
             "name": best_pair.get("baseToken", {}).get("name"),
             "price": float(best_pair.get("priceUsd") or 0),
             "change_24h": float((best_pair.get("priceChange") or {}).get("h24", 0) or 0),
-            "change_7d": float((best_pair.get("priceChange") or {}).get("h7d", 0) or 0),  # ✅ düzeltildi
+            "change_7d": float((best_pair.get("priceChange") or {}).get("h7d", 0) or 0),
             "volume_24h": float((best_pair.get("volume") or {}).get("h24", 0) or 0),
             "market_cap": None,
             "liquidity": float((best_pair.get("liquidity") or {}).get("usd", 0) or 0),
