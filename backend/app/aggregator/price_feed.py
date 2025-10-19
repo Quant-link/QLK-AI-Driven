@@ -138,23 +138,45 @@ def get_usd_per_qlk() -> Union[float, None]:
         return _CG_CACHE["usd_per_qlk"]
 
     qlk_id = "quantlink"
-    base_url = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
+    base_url = os.getenv("COINGECKO_BASE_URL", "https://pro-api.coingecko.com/api/v3")
     api_key = os.getenv("COINGECKO_API_KEY")
 
     headers = {"accept": "application/json"}
     if api_key:
         headers["x-cg-pro-api-key"] = api_key
 
+
     url = f"{base_url}/simple/price"
     params = {"ids": qlk_id, "vs_currencies": "usd"}
 
-    try:
-        r = requests.get(url, params=params, headers=headers, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        price = float(data[qlk_id]["usd"])
-        _CG_CACHE.update({"ts": now, "usd_per_qlk": price})
-        return price
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch QLK price: {e}")
-        return None
+    max_retries = 3
+    retry_delay = 2
+
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=10)
+
+            if r.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    print(f"[RATE_LIMIT] QLK price fetch 429 - Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})")
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[WARN] QLK price fetch 429 - Max retries exceeded")
+                    return None
+
+            if r.status_code != 200:
+                print(f"[WARN] QLK price fetch returned status {r.status_code}")
+                continue
+
+            data = r.json()
+            price = float(data[qlk_id]["usd"])
+            _CG_CACHE.update({"ts": now, "usd_per_qlk": price})
+            return price
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch QLK price: {e}")
+            continue
+
+    return None
