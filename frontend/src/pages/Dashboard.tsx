@@ -54,7 +54,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/api/dca_data")
+    fetch("http://localhost:8000/api/dca_data")
       .then((res) => res.json())
       .then((data) => {
         setStrategies(data?.strategies || []);
