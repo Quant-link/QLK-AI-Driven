@@ -34,17 +34,17 @@ app.include_router(market_data_router, prefix="/api")
 app.include_router(routes_router, prefix="/api")
 app.include_router(risk_management_router, prefix="/api")
 
-@app.get("/api/arbitrage")
-def get_arbitrage():
-    token_data = {}
-    for symbol in TOKENS.keys():
-        entries = fetch_token_data_extended(symbol)
-        if entries:
-            token_data[symbol] = entries
-
-    gas_costs = fetch_gas_costs()
-    result = detect_arbitrage(token_data, gas_costs)
-    return result
+@app.get("/api/arbitrage_coming_soon")
+def get_arbitrage_coming_soon():
+    """
+    Arbitrage detection is currently under development.
+    Real arbitrage opportunities require QLK token to have liquidity pools on multiple DEXs.
+    """
+    return {
+        "status": "coming_soon",
+        "message": "Arbitrage detection is currently under development",
+        "opportunities": []
+    }
 
 @app.on_event("startup")
 def auto_start_dca():
