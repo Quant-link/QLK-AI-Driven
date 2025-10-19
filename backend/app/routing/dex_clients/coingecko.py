@@ -10,6 +10,7 @@ if _api_key:
 
 CG_BASE_URL = os.getenv("COINGECKO_BASE_URL", "https://pro-api.coingecko.com/api/v3")
 
+
 ETH_RPC_URL = os.getenv("ETH_RPC_URL") 
 
 def _to_checksum(addr: str) -> str:
@@ -47,15 +48,33 @@ def _rpc_get_decimals(address: str) -> Optional[int]:
     return None
 
 def _cg_get(path: str, params: Dict) -> Optional[dict]:
-    try:
-        r = requests.get(f"{CG_BASE_URL}{path}", headers=_CG_HEADERS, params=params, timeout=15)
-        if r.status_code != 200:
-            logger.warning(f"[WARN] CG {path} {r.status_code}")
+    max_retries = 3
+    retry_delay = 2  
+
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(f"{CG_BASE_URL}{path}", headers=_CG_HEADERS, params=params, timeout=15)
+
+            if r.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"[RATE_LIMIT] CG {path} 429 - Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.warning(f"[WARN] CG {path} 429 - Max retries exceeded")
+                    return None
+
+            if r.status_code != 200:
+                logger.warning(f"[WARN] CG {path} {r.status_code}")
+                return None
+
+            return r.json()
+        except Exception as e:
+            logger.error(f"[ERROR] CG request failed {path}: {e}")
             return None
-        return r.json()
-    except Exception as e:
-        logger.error(f"[ERROR] CG request failed {path}: {e}")
-        return None
+
+    return None
 
 def fetch_token_on_ethereum_by_cgid(cg_id: str):
     if not cg_id:
