@@ -112,7 +112,7 @@ export function RouteTable() {
 
   const fetchRoutes = (amt: number) => {
     setLoading(true);
-    fetch(`http://localhost:8000/api/api/routes?amount=${amt}`)
+    fetch(`http://localhost:8000/api/routes?amount=${amt}`)
       .then((res) => res.json())
       .then((data) => {
         setRoutes(Array.isArray(data?.routes) ? data.routes : []);
