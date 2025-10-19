@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 import math
 from decimal import Decimal, DivisionByZero, getcontext
 from fastapi import APIRouter
@@ -11,7 +12,6 @@ router = APIRouter()
 
 CG_BASE_URL = os.getenv("COINGECKO_BASE_URL", "https://pro-api.coingecko.com/api/v3")
 CG_KEY = os.getenv("COINGECKO_API_KEY")
-
 
 def fetch_batch_market_data():
     ids = [meta["cg_id"] for _, meta in TOKENS.items() if meta.get("cg_id") and meta["cg_id"] != "null"]
@@ -32,13 +32,33 @@ def fetch_batch_market_data():
     if CG_KEY:
         headers["x-cg-pro-api-key"] = CG_KEY
 
-    try:
-        res = requests.get(url, params=params, headers=headers, timeout=30)
-        res.raise_for_status()
-        return res.json()
-    except Exception as e:
-        print(f"[ERROR] Batch fetch failed: {e}")
-        return {}
+    max_retries = 3
+    retry_delay = 2
+
+    for attempt in range(max_retries):
+        try:
+            res = requests.get(url, params=params, headers=headers, timeout=30)
+
+            if res.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    print(f"[RATE_LIMIT] Batch market data 429 - Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[WARN] Batch market data 429 - Max retries exceeded")
+                    return {}
+
+            if res.status_code != 200:
+                print(f"[WARN] Batch market data returned status {res.status_code}")
+                continue
+
+            return res.json()
+        except Exception as e:
+            print(f"[ERROR] Batch fetch failed: {e}")
+            continue
+
+    return {}
 
 
 def fetch_price_history(cg_id: str, days: int = 30):
@@ -48,14 +68,36 @@ def fetch_price_history(cg_id: str, days: int = 30):
     if CG_KEY:
         headers["x-cg-pro-api-key"] = CG_KEY
 
-    try:
-        r = requests.get(url, params=params, headers=headers, timeout=30)
-        r.raise_for_status()
-        prices = [p[1] for p in r.json().get("prices", [])]
-        return prices
-    except Exception as e:
-        print(f"[ERROR] fetch_price_history failed for {cg_id}: {e}")
-        return []
+    max_retries = 3
+    retry_delay = 2
+
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=30)
+
+            # Handle rate limiting (429 Too Many Requests)
+            if r.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    print(f"[RATE_LIMIT] Price history {cg_id} 429 - Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[WARN] Price history {cg_id} 429 - Max retries exceeded")
+                    return []
+
+            # Only process if status is 200
+            if r.status_code != 200:
+                print(f"[WARN] Price history {cg_id} returned status {r.status_code}")
+                continue
+
+            prices = [p[1] for p in r.json().get("prices", [])]
+            return prices
+        except Exception as e:
+            print(f"[ERROR] fetch_price_history failed for {cg_id}: {e}")
+            continue
+
+    return []
 
 
 def calc_risk_metrics(prices: list[float]) -> dict:
