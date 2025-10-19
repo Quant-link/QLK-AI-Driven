@@ -82,6 +82,7 @@ def _cg_headers() -> dict:
     api_key = os.getenv("COINGECKO_API_KEY")
     if api_key:
         h["x-cg-pro-api-key"] = api_key
+
     return h
 
 def _resolve_via_coingecko(token_id: str) -> Optional[str]:
@@ -292,7 +293,7 @@ def get_best_route(from_token: str, to_token: str, amount: float):
 
 router = APIRouter()
 
-@router.get("/api/routes")
+@router.get("/routes")
 def get_routes_data(amount: float = Query(500, description="Base trade amount for route calculation")):
     try:
         usd_prices = fetch_all_usd_prices()
@@ -386,7 +387,7 @@ def get_routes_data(amount: float = Query(500, description="Base trade amount fo
         return {"routes": []}
 
 
-@router.get("/api/route_details/{from_token}/{to_token}")
+@router.get("/route_details/{from_token}/{to_token}")
 def get_route_details(from_token: str, to_token: str, amount: float = 1000):
     try:
         best_route = get_best_route(from_token, to_token, amount)
